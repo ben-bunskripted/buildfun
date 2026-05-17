@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "benny-v1";
+const CACHE = "benny-v2";
 
 const CARD_NAMES = [
   "1B","1J","2B","2J","2C","2D","2H","2S","3C","3D","3H","3S",
@@ -28,6 +28,10 @@ const SHELL = [
   "./assets/wildcard.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
+  "./assets/icon-192-maskable.png",
+  "./assets/icon-512-maskable.png",
+  "./assets/screenshot-wide.png",
+  "./assets/screenshot-narrow.png",
   ...CARD_NAMES.map(n => `./assets/cards/${n}.svg`),
 ];
 

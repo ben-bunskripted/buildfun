@@ -111,6 +111,7 @@ body {
 #screen-start { align-items: center; justify-content: center; }
 .start-panel { text-align: left; }
 .card-panel.start-panel { overflow: hidden; padding-top: 0; }
+.start-hero-link { display: block; line-height: 0; }
 .start-hero {
   display: block;
   width: calc(100% + 48px);
@@ -146,6 +147,7 @@ body {
   font-family: inherit;
 }
 .name-input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.name-input, .select { min-width: 0; max-width: 100%; }
 
 .select {
   appearance: none; -webkit-appearance: none;
@@ -181,8 +183,14 @@ body {
 .opp-row {
   display: grid; grid-template-columns: 1fr 130px; gap: 8px; align-items: center;
 }
+.opp-row > * { min-width: 0; }
 .opp-row .name-input { padding: 10px 12px; }
 .opp-row .select { padding: 10px 30px 10px 10px; }
+
+@media (max-width: 430px) {
+  .opp-row { grid-template-columns: 1fr; }
+  .seg { flex-wrap: wrap; max-width: 100%; }
+}
 
 /* Scoring screen */
 .scoring-wrap { padding: 16px; display: flex; justify-content: center; }
@@ -305,6 +313,7 @@ body {
 }
 .top-bar-help ~ .top-bar-help { margin-left: 0; }
 .top-bar-exit { padding: 6px 14px; font-size: 13px; }
+.top-bar-logo-link { display: inline-flex; flex: 0 0 auto; line-height: 0; }
 .top-bar-logo {
   height: 32px; width: auto;
   flex: 0 0 auto;

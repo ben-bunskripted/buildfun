@@ -71,6 +71,15 @@ Two distinct keys in `storage.js`:
 
 `hasSnapshot()` + `load()` drive the resume banner on the start screen and the overwrite-confirmation modal.
 
+## PWA / offline
+
+Benny is an installable PWA scoped to `./` (so it's self-contained inside `projects/benny-card-game/` and doesn't claim the buildfun homepage).
+
+- `manifest.webmanifest` — `display: standalone`, portrait, navy theme/background. Icons at `assets/icon-192.png` and `assets/icon-512.png` (generated from `favicon.png`, declared `"any maskable"` so Android adaptive cropping keeps the B visible).
+- `sw.js` — cache-first service worker. On install, pre-caches the full shell: HTML, CSS, all JS modules, the three asset PNGs, both icons, and all 56 card SVGs. POSTs pass through (so the Netlify feedback form still works). Offline navigations fall back to `./index.html`. Registered at end of `index.html` after the main module loads.
+
+**Bump the cache version on every deploy that changes a shell file.** The `CACHE = "benny-v1"` constant at the top of `sw.js` is the cache key; the activate handler deletes any cache whose key doesn't match. Bumping (e.g. to `"benny-v2"`) is what forces installed clients to re-fetch updated JS/CSS/assets — otherwise users keep getting the old cached copy until their browser eventually expires the SW.
+
 ## Save & exit
 
 Top bar of both the play and scoring screens has a **Save & exit** pill (`#play-exit-btn` / `#scoring-exit-btn`). Calls `exitToStart()` which:
