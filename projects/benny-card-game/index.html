@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0d1e3d" />
+<title>Benny</title>
+<link rel="icon" type="image/png" href="assets/favicon.png" />
+<link rel="apple-touch-icon" href="assets/favicon.png" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- Start screen -->
+  <section id="screen-start" class="screen active">
+    <div class="card-panel start-panel">
+      <img class="start-hero" src="assets/logo-bg.png" alt="Benny — 14 rounds, 1 wildcard, endless strategy" />
+
+      <div id="resume-banner" class="resume-banner hidden">
+        <div>
+          <strong>Resume match?</strong>
+          <span class="muted" id="resume-banner-detail"></span>
+        </div>
+        <div class="resume-actions">
+          <button class="pill ghost" id="resume-discard">Discard</button>
+          <button class="pill primary" id="resume-go">Resume</button>
+        </div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">Mode</span>
+        <div class="seg" id="mode-seg">
+          <button type="button" class="seg-btn active" data-mode="multiplayer">Multiplayer</button>
+          <button type="button" class="seg-btn" data-mode="cpu">Solo vs CPU</button>
+          <button type="button" class="seg-btn" data-mode="scoring">Scoring only</button>
+        </div>
+      </label>
+
+      <!-- Multiplayer config -->
+      <div class="mode-block" id="mode-multiplayer">
+        <label class="field">
+          <span class="field-label">Players</span>
+          <div class="seg" id="player-count">
+            <button type="button" class="seg-btn" data-count="2">2</button>
+            <button type="button" class="seg-btn active" data-count="3">3</button>
+            <button type="button" class="seg-btn" data-count="4">4</button>
+          </div>
+        </label>
+        <div id="name-fields" class="name-fields"></div>
+        <label class="field">
+          <span class="field-label">Dealer</span>
+          <select id="dealer-select" class="select"></select>
+        </label>
+      </div>
+
+      <!-- Solo vs CPU config -->
+      <div class="mode-block hidden" id="mode-cpu">
+        <label class="field">
+          <span class="field-label">Your name</span>
+          <input type="text" class="name-input" id="solo-name" maxlength="20" autocomplete="off" placeholder="You" />
+        </label>
+        <label class="field">
+          <span class="field-label">Opponents</span>
+          <div class="seg" id="solo-opp-count">
+            <button type="button" class="seg-btn" data-count="1">1</button>
+            <button type="button" class="seg-btn active" data-count="2">2</button>
+            <button type="button" class="seg-btn" data-count="3">3</button>
+          </div>
+        </label>
+        <div id="solo-opponents" class="opp-list"></div>
+        <label class="field">
+          <span class="field-label">Dealer</span>
+          <select id="solo-dealer-select" class="select"></select>
+        </label>
+      </div>
+
+      <!-- Scoring config -->
+      <div class="mode-block hidden" id="mode-scoring">
+        <p class="muted small-help">Use this when you're playing with real cards and just need the app to keep score.</p>
+        <label class="field">
+          <span class="field-label">Players</span>
+          <div class="seg" id="scoring-player-count">
+            <button type="button" class="seg-btn" data-count="2">2</button>
+            <button type="button" class="seg-btn active" data-count="3">3</button>
+            <button type="button" class="seg-btn" data-count="4">4</button>
+          </div>
+        </label>
+        <div id="scoring-name-fields" class="name-fields"></div>
+      </div>
+
+      <label class="field">
+        <span class="field-label">Card style</span>
+        <div class="seg" id="card-style-seg">
+          <button type="button" class="seg-btn active" data-style="modern">Modern</button>
+          <button type="button" class="seg-btn" data-style="classic">Classic</button>
+        </div>
+      </label>
+
+      <button id="start-btn" class="pill primary big">Start match</button>
+    </div>
+  </section>
+
+  <!-- Dealer reveal screen -->
+  <section id="screen-reveal" class="screen">
+    <div class="reveal-wrap">
+      <h2 class="reveal-title">Picking dealer&hellip;</h2>
+      <div class="reel-frame" aria-hidden="true">
+        <div class="reel" id="reel"></div>
+        <div class="reel-marker"></div>
+      </div>
+      <p class="reveal-name" id="reveal-name"></p>
+      <button id="reveal-continue" class="pill primary big hidden">Begin round 1</button>
+    </div>
+  </section>
+
+  <!-- Pass to next player screen -->
+  <section id="screen-pass" class="screen">
+    <div class="pass-wrap">
+      <p class="pass-pre">Pass the device to</p>
+      <h2 class="pass-name" id="pass-name"></h2>
+      <p class="pass-sub" id="pass-sub"></p>
+      <button id="pass-show" class="pill primary big">Show hand</button>
+    </div>
+  </section>
+
+  <!-- Main play screen -->
+  <section id="screen-play" class="screen">
+    <header class="top-bar">
+      <img class="top-bar-logo" src="assets/favicon.png" alt="Benny" />
+      <div class="badge round-badge"><span class="badge-label">Round</span><span id="bar-round">1</span><span class="muted">/14</span></div>
+      <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="bar-wild">A</span></div>
+      <div class="badge turn-badge"><span class="badge-label">Turn</span><span id="bar-turn"></span></div>
+      <button type="button" class="pill ghost top-bar-exit" id="play-exit-btn">Save &amp; exit</button>
+    </header>
+
+    <div class="table-area" id="table-area">
+      <div class="others" id="others"></div>
+
+      <div class="middle">
+        <div class="pile-wrap">
+          <button type="button" class="pile draw-pile" id="draw-pile" aria-label="Draw from deck">
+            <div class="pile-card back"></div>
+            <span class="pile-count" id="draw-count">52</span>
+          </button>
+          <span class="pile-label">Deck</span>
+        </div>
+        <div class="pile-wrap">
+          <button type="button" class="pile discard-pile" id="discard-pile" aria-label="Take from discard pile">
+            <div class="pile-card-host" id="discard-host"></div>
+          </button>
+          <span class="pile-label">Discard</span>
+        </div>
+      </div>
+
+      <div class="self-melds" id="self-melds"></div>
+    </div>
+
+    <div class="hand-section" id="hand-section">
+      <div class="hand-bar">
+        <span class="hand-title">Your hand</span>
+        <div class="hand-actions">
+          <button class="pill ghost" id="sort-btn">Sort hand</button>
+          <button class="pill primary" id="play-set-btn" disabled>Play set</button>
+          <button class="pill" id="add-set-btn" disabled>Add to set</button>
+          <button class="pill" id="swap-btn" disabled>Swap wild</button>
+        </div>
+      </div>
+      <div class="hand" id="hand"></div>
+      <div class="hand-hint" id="hand-hint">Tap cards to select. Then choose an action.</div>
+    </div>
+  </section>
+
+  <!-- Scoring-only screen -->
+  <section id="screen-scoring" class="screen">
+    <header class="top-bar">
+      <img class="top-bar-logo" src="assets/favicon.png" alt="Benny" />
+      <div class="badge round-badge"><span class="badge-label">Round</span><span id="sc-round">1</span><span class="muted">/14</span></div>
+      <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="sc-wild">A</span></div>
+      <div class="badge turn-badge"><span class="badge-label">Dealer</span><span id="sc-dealer"></span></div>
+      <button type="button" class="pill ghost top-bar-exit" id="scoring-exit-btn">Save &amp; exit</button>
+    </header>
+    <div class="scoring-wrap">
+      <div class="card-panel scoring-panel">
+        <h2>Enter the round result</h2>
+        <p class="muted">Pick the winner, then enter each other player's hand total.</p>
+        <div id="sc-rows" class="sc-rows"></div>
+        <button id="sc-submit" class="pill primary big">Save round</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Round end -->
+  <section id="screen-round-end" class="screen">
+    <div class="card-panel summary-panel">
+      <h2 id="round-end-title">Round complete</h2>
+      <p id="round-end-winner" class="summary-winner"></p>
+      <table class="summary-table">
+        <thead><tr><th>Player</th><th>Round</th><th>Total</th></tr></thead>
+        <tbody id="round-end-rows"></tbody>
+      </table>
+      <button id="continue-btn" class="pill primary big">Continue</button>
+    </div>
+  </section>
+
+  <!-- Match end -->
+  <section id="screen-match-end" class="screen">
+    <div class="confetti" id="confetti" aria-hidden="true"></div>
+    <div class="card-panel summary-panel match-end-panel">
+      <h2 class="trophy">🏆 <span id="match-winner-name"></span> wins!</h2>
+      <p class="summary-winner">Lowest cumulative score after 14 rounds.</p>
+      <table class="summary-table">
+        <thead><tr><th>Player</th><th>Final score</th></tr></thead>
+        <tbody id="match-end-rows"></tbody>
+      </table>
+      <button id="new-match-btn" class="pill primary big">New match</button>
+    </div>
+  </section>
+
+  <!-- Modal: wildcard representation choice -->
+  <div id="modal-wild-choice" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-inner">
+      <h3 id="modal-wild-title">Use wildcard as&hellip;</h3>
+      <p id="modal-wild-body"></p>
+      <div class="modal-actions" id="modal-wild-actions"></div>
+    </div>
+  </div>
+
+  <!-- Modal: choose set to add to -->
+  <div id="modal-pick-set" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-inner">
+      <h3>Choose a set to add to</h3>
+      <div class="set-picker" id="set-picker"></div>
+      <div class="modal-actions">
+        <button class="pill ghost" id="modal-pick-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: swap wildcard -->
+  <div id="modal-swap" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-inner">
+      <h3>Swap a wildcard</h3>
+      <p class="muted">Pick a wildcard on the table. You must hold the natural card it represents.</p>
+      <div class="swap-list" id="swap-list"></div>
+      <div class="modal-actions">
+        <button class="pill ghost" id="modal-swap-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: confirm discard -->
+  <div id="modal-confirm" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-inner">
+      <h3 id="modal-confirm-title"></h3>
+      <p id="modal-confirm-body"></p>
+      <div class="modal-actions">
+        <button class="pill ghost" id="modal-confirm-no">Cancel</button>
+        <button class="pill primary" id="modal-confirm-yes">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CPU recap modal -->
+  <div id="modal-cpu-recap" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-inner">
+      <h3 id="cpu-recap-title">CPU turn</h3>
+      <ul id="cpu-recap-list" class="recap-list"></ul>
+      <div class="modal-actions">
+        <button class="pill primary" id="cpu-recap-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
