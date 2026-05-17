@@ -179,6 +179,39 @@ function buildStart() {
   $("feedback-form").addEventListener("submit", onFeedbackSubmit);
 }
 
+// ---------- Install link ----------
+// Chrome/Edge/Android fire beforeinstallprompt when the PWA meets installability
+// criteria. We stash the event and reveal the "Install Benny" link on the start
+// screen so users have a discoverable install path (the menu option is buried).
+let deferredInstallPrompt = null;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return;
+  const btn = $("install-btn");
+  if (btn) btn.classList.remove("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  const btn = $("install-btn");
+  if (btn) btn.classList.add("hidden");
+});
+
+function wireInstallLink() {
+  $("install-btn").addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    const promptEvent = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    try {
+      promptEvent.prompt();
+      await promptEvent.userChoice;
+    } catch (_err) { /* swallow — appinstalled will hide if they accepted */ }
+    $("install-btn").classList.add("hidden");
+  });
+}
+
 function openRules() { $("modal-rules").classList.remove("hidden"); }
 function closeRules() { $("modal-rules").classList.add("hidden"); }
 
@@ -723,6 +756,7 @@ function wireUp() {
   $("scoring-rules-btn").addEventListener("click", openRules);
   $("play-feedback-btn").addEventListener("click", openFeedback);
   $("scoring-feedback-btn").addEventListener("click", openFeedback);
+  wireInstallLink();
 
   // Card selection (delegated)
   $("hand").addEventListener("click", (e) => {

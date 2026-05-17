@@ -731,6 +731,10 @@ body {
 .hp-field { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 .feedback-thanks p { margin: 4px 0 16px; }
 
+/* Install link — shown on the start screen when beforeinstallprompt fires.
+   Reuses the .text-link styling already defined above. */
+#install-btn.hidden { display: none; }
+
 .modal-rules-inner { max-width: 560px; max-height: 88vh; display: flex; flex-direction: column; }
 .modal-rules-inner h3 { font-size: 20px; margin-bottom: 12px; }
 .rules-body {
