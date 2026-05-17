@@ -4,5 +4,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Local backups not for deploy
+# Local backups & notes not for deploy
 logo-original.png
+ideas.png
