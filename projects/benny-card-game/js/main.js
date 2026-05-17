@@ -1,7 +1,7 @@
 // Benny — UI controller.
 
 import { renderCard, renderCardBack, compareForSort, SUIT_GLYPH, isWildcard, setCardStyle } from "./cards.js";
-import { randomInt } from "./rng.js";
+import { randomInt, shuffleInPlace } from "./rng.js";
 import {
   createMatch, startNextRound, beginTurn, currentPlayer, topOfDiscard,
   drawFromDeck, drawFromDiscard, placeNewSet, addToSet, swapWildcard,
@@ -26,14 +26,14 @@ let ui = {
   numPlayers: 3,
   playerNames: ["", "", "", ""],
   dealerChoice: "random",
-  // Solo setup
+  // Solo setup — opponent names pulled fresh from the same pool as DEFAULT_NAMES (set below).
   solo: {
     humanName: "",
     oppCount: 2,
     opponents: [
-      { name: "Sam", difficulty: "medium" },
-      { name: "Jess", difficulty: "easy" },
-      { name: "Riley", difficulty: "hard" },
+      { name: "", difficulty: "medium" },
+      { name: "", difficulty: "easy" },
+      { name: "", difficulty: "hard" },
     ],
     dealerChoice: "random",
   },
@@ -79,7 +79,9 @@ function toast(msg, ms = 1800) {
 }
 
 // ---------- Start screen ----------
-const DEFAULT_NAMES = ["Alex","Sam","Jess","Riley"];
+const DEFAULT_NAMES = ["Ben", ...shuffleInPlace(["Roxy","Kye","Tim","Wayne","Nath","Sean","Fiona","Jon","Zach"]).slice(0, 3)];
+// Use the same shuffled picks for CPU opponent defaults so the suggested names line up across modes.
+ui.solo.opponents.forEach((o, i) => { o.name = DEFAULT_NAMES[i + 1] || `CPU ${i + 1}`; });
 function defaultName(i) { return DEFAULT_NAMES[i] || `Player ${i+1}`; }
 
 function buildStart() {
@@ -157,6 +159,57 @@ function buildStart() {
   });
 
   $("start-btn").addEventListener("click", onStartMatch);
+
+  // Rules modal — opened from start screen, also from play / scoring top bars (wired in wireUp).
+  const rulesModal = $("modal-rules");
+  $("rules-btn").addEventListener("click", openRules);
+  $("modal-rules-close").addEventListener("click", closeRules);
+  rulesModal.addEventListener("click", (e) => {
+    if (e.target === rulesModal) closeRules();
+  });
+
+  // Feedback modal — same opener pattern; submit intercepted below.
+  const feedbackModal = $("modal-feedback");
+  $("feedback-btn").addEventListener("click", openFeedback);
+  $("modal-feedback-cancel").addEventListener("click", closeFeedback);
+  $("feedback-thanks-close").addEventListener("click", closeFeedback);
+  feedbackModal.addEventListener("click", (e) => {
+    if (e.target === feedbackModal) closeFeedback();
+  });
+  $("feedback-form").addEventListener("submit", onFeedbackSubmit);
+}
+
+function openRules() { $("modal-rules").classList.remove("hidden"); }
+function closeRules() { $("modal-rules").classList.add("hidden"); }
+
+function openFeedback() {
+  $("modal-feedback").classList.remove("hidden");
+  $("feedback-form").classList.remove("hidden");
+  $("feedback-thanks").classList.add("hidden");
+  $("feedback-form").reset();
+}
+function closeFeedback() { $("modal-feedback").classList.add("hidden"); }
+
+async function onFeedbackSubmit(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const submitBtn = $("feedback-submit");
+  submitBtn.disabled = true;
+  try {
+    const body = new URLSearchParams(new FormData(form)).toString();
+    const res = await fetch("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    form.classList.add("hidden");
+    $("feedback-thanks").classList.remove("hidden");
+  } catch (_err) {
+    toast("Couldn't send — try again in a moment.");
+  } finally {
+    submitBtn.disabled = false;
+  }
 }
 
 function showModeBlock() {
@@ -666,6 +719,10 @@ function exitToStart() {
 function wireUp() {
   $("play-exit-btn").addEventListener("click", exitToStart);
   $("scoring-exit-btn").addEventListener("click", exitToStart);
+  $("play-rules-btn").addEventListener("click", openRules);
+  $("scoring-rules-btn").addEventListener("click", openRules);
+  $("play-feedback-btn").addEventListener("click", openFeedback);
+  $("scoring-feedback-btn").addEventListener("click", openFeedback);
 
   // Card selection (delegated)
   $("hand").addEventListener("click", (e) => {
@@ -1036,12 +1093,34 @@ function goScoringRoundScreen() {
 
   // Stash for the submit handler — closure capture.
   $("sc-submit")._sel = sel;
+
+  renderScoringHistory();
+}
+
+function renderScoringHistory() {
+  const host = $("sc-history");
+  if (!host) return;
+  const history = Array.isArray(state.roundHistory) ? state.roundHistory : [];
+  if (!history.length) { host.innerHTML = ""; return; }
+  const head = `<tr><th>R</th>${state.players.map(p => `<th>${escapeHTML(p.name)}</th>`).join("")}</tr>`;
+  const body = history.map(h => {
+    const cells = h.cumulative.map((c, i) =>
+      `<td class="${i === h.winnerIdx ? "winner" : ""}">${c}</td>`).join("");
+    return `<tr><td class="r-col">${h.round}</td>${cells}</tr>`;
+  }).join("");
+  host.innerHTML = `<h3 class="sc-history-title">Running scores</h3>
+    <table class="sc-history-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 function onScoringSubmit() {
   const sel = $("sc-submit")._sel;
   if (!sel) return;
   if (sel.winnerIdx == null) { toast("Pick a winner."); return; }
+  for (let i = 0; i < sel.scores.length; i++) {
+    if (i === sel.winnerIdx) continue;
+    const v = (sel.scores[i] ?? "").toString().trim();
+    if (v === "") { toast(`Enter a score for ${state.players[i].name}.`); return; }
+  }
   const scores = sel.scores.map(s => Number.parseInt(s, 10) || 0);
   const r = submitScoringRound(state, sel.winnerIdx, scores);
   if (!r.ok) { toast(r.reason); return; }
@@ -1148,7 +1227,8 @@ function setupCardZoom() {
     return el && el.classList.contains("card")
       && !el.classList.contains("in-hand")
       && !el.classList.contains("back")
-      && !el.classList.contains("drag-placeholder");
+      && !el.classList.contains("drag-placeholder")
+      && !el.closest(".discard-pile");
   }
   function show(card) {
     const clone = card.cloneNode(true);

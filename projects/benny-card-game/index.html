@@ -98,6 +98,8 @@
       </label>
 
       <button id="start-btn" class="pill primary big">Start match</button>
+      <button type="button" id="rules-btn" class="text-link">How to play</button>
+      <button type="button" id="feedback-btn" class="text-link">Send feedback</button>
     </div>
   </section>
 
@@ -131,6 +133,8 @@
       <div class="badge round-badge"><span class="badge-label">Round</span><span id="bar-round">1</span><span class="muted">/14</span></div>
       <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="bar-wild">A</span></div>
       <div class="badge turn-badge"><span class="badge-label">Turn</span><span id="bar-turn"></span></div>
+      <button type="button" class="pill ghost top-bar-help" id="play-rules-btn" aria-label="How to play" title="How to play">?</button>
+      <button type="button" class="pill ghost top-bar-help" id="play-feedback-btn" aria-label="Send feedback" title="Send feedback">&#128172;</button>
       <button type="button" class="pill ghost top-bar-exit" id="play-exit-btn">Save &amp; exit</button>
     </header>
 
@@ -178,6 +182,8 @@
       <div class="badge round-badge"><span class="badge-label">Round</span><span id="sc-round">1</span><span class="muted">/14</span></div>
       <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="sc-wild">A</span></div>
       <div class="badge turn-badge"><span class="badge-label">Dealer</span><span id="sc-dealer"></span></div>
+      <button type="button" class="pill ghost top-bar-help" id="scoring-rules-btn" aria-label="How to play" title="How to play">?</button>
+      <button type="button" class="pill ghost top-bar-help" id="scoring-feedback-btn" aria-label="Send feedback" title="Send feedback">&#128172;</button>
       <button type="button" class="pill ghost top-bar-exit" id="scoring-exit-btn">Save &amp; exit</button>
     </header>
     <div class="scoring-wrap">
@@ -186,6 +192,7 @@
         <p class="muted">Pick the winner, then enter each other player's hand total.</p>
         <div id="sc-rows" class="sc-rows"></div>
         <button id="sc-submit" class="pill primary big">Save round</button>
+        <div id="sc-history" class="sc-history"></div>
       </div>
     </div>
   </section>
@@ -268,6 +275,92 @@
       <ul id="cpu-recap-list" class="recap-list"></ul>
       <div class="modal-actions">
         <button class="pill primary" id="cpu-recap-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Benny rules -->
+  <div id="modal-rules" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-rules-title">
+    <div class="modal-inner modal-rules-inner">
+      <h3 id="modal-rules-title">Benny rules</h3>
+      <div class="rules-body">
+        <h4>Aim</h4>
+        <p>Lowest total score wins after 14 rounds.</p>
+
+        <h4>Rounds and wildcards</h4>
+        <p>There are 14 rounds. The wild rank changes each round: A, 2, 3, 4, 5, 6, 7, 8, 9, 10, J, Q, K, then A again.</p>
+
+        <h4>Dealing</h4>
+        <p>Each player starts with 7 cards. The dealer gets 8 cards and starts the round by discarding one card, so everyone then has 7.</p>
+
+        <h4>Turn structure</h4>
+        <ol>
+          <li>Pick up one card from either the deck or discard pile.</li>
+          <li>Play sets, add to sets, or swap wildcards if you can/want to.</li>
+          <li>End your turn by discarding one card.</li>
+        </ol>
+        <p>You should normally never have more than 8 cards during your turn, and should end with 7 unless you go out.</p>
+
+        <h4>Playing a set</h4>
+        <p>A set must have at least 3 cards and can be either:</p>
+        <ul>
+          <li><strong>Number set:</strong> same rank, different suits, max 4 cards. Wildcards can fill missing suits, but the set cannot be bigger than the natural maximum.</li>
+          <li><strong>Run:</strong> same suit, consecutive ranks. Aces can be low or high, but not wrapped, so K&ndash;A&ndash;2 is not valid.</li>
+        </ul>
+
+        <h4>Wildcards</h4>
+        <p>Wildcards can stand in for missing cards in a set or run. For runs, the wildcard must have a specific chosen position &mdash; e.g. K&ndash;Q&ndash;Wild could mean the wildcard is J or A depending on the run.</p>
+
+        <h4>Adding to sets</h4>
+        <p>Once you have played your own first set, you are &ldquo;open&rdquo; and can add valid cards to any set on the table.</p>
+
+        <h4>Swapping wildcards</h4>
+        <p>Once open, you can swap a natural card from your hand for a wildcard on the table, but only if your card exactly matches what the wildcard is representing.</p>
+
+        <h4>Going out</h4>
+        <p>If you discard/play so your hand is empty, the round ends immediately.</p>
+
+        <h4>Scoring</h4>
+        <p>The player who goes out scores 0 for the round. Everyone else scores the value of cards left in hand:</p>
+        <ul>
+          <li>Number cards = face value</li>
+          <li>J = 11, Q = 12, K = 13, A = 14</li>
+          <li>Wildcards = 15</li>
+        </ul>
+        <p>Lowest cumulative score after the final round wins.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="pill primary" id="modal-rules-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Feedback (Netlify Forms — form is detected from static HTML at deploy time) -->
+  <div id="modal-feedback" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-feedback-title">
+    <div class="modal-inner">
+      <h3 id="modal-feedback-title">Send feedback</h3>
+      <p>Bug report, idea, kind words &mdash; all welcome.</p>
+      <form id="feedback-form" name="benny-feedback" method="POST" data-netlify="true" netlify-honeypot="bot-field">
+        <input type="hidden" name="form-name" value="benny-feedback" />
+        <p class="hp-field"><label>Don&rsquo;t fill this in: <input name="bot-field" tabindex="-1" autocomplete="off" /></label></p>
+        <label class="field">
+          <span class="field-label">Your name (optional)</span>
+          <input type="text" name="name" class="name-input" maxlength="60" autocomplete="name" />
+        </label>
+        <label class="field">
+          <span class="field-label">Message</span>
+          <textarea name="message" class="name-input feedback-textarea" rows="5" required maxlength="2000" placeholder="What&rsquo;s on your mind?"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="pill ghost" id="modal-feedback-cancel">Cancel</button>
+          <button type="submit" class="pill primary" id="feedback-submit">Send</button>
+        </div>
+      </form>
+      <div id="feedback-thanks" class="feedback-thanks hidden">
+        <p><strong>Thanks!</strong> Your feedback was sent.</p>
+        <div class="modal-actions">
+          <button type="button" class="pill primary" id="feedback-thanks-close">Close</button>
+        </div>
       </div>
     </div>
   </div>

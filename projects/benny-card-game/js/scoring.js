@@ -14,6 +14,7 @@ export function createScoringMatch(playerNames, dealerIndex = 0) {
     wildcardRank: null,
     perRoundScores: [],
     roundWinner: null,
+    roundHistory: [],
     phase: "matchStart",
   };
 }
@@ -48,6 +49,14 @@ export function submitScoringRound(state, winnerIdx, scores) {
   state.roundWinner = winnerIdx;
   state.perRoundScores = scores.slice();
   for (let i = 0; i < state.players.length; i++) state.players[i].score += scores[i];
+  if (!Array.isArray(state.roundHistory)) state.roundHistory = [];
+  state.roundHistory.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx,
+    scores: scores.slice(),
+    cumulative: state.players.map(p => p.score),
+  });
   state.phase = "roundOver";
   return { ok: true };
 }
