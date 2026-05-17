@@ -2,7 +2,7 @@
   "id": "/projects/benny-card-game/",
   "name": "Benny — Card Game",
   "short_name": "Benny",
-  "description": "Hot-seat card game for 2–4 players. 14 rounds, 1 rotating wildcard.",
+  "description": "Benny is a fast, tactical card game about building sets, using wildcards wisely, and getting rid of your hand before everyone else. Play through 14 rounds where the wildcard changes each time, keep your score low, and try to finish as the overall winner.",
   "start_url": ".",
   "scope": "./",
   "display": "standalone",
