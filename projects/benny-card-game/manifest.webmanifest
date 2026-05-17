@@ -6,6 +6,7 @@
   "start_url": ".",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone"],
   "orientation": "portrait",
   "background_color": "#0d1e3d",
   "theme_color": "#0d1e3d",
@@ -18,17 +19,17 @@
   "screenshots": [
     {
       "src": "assets/screenshot-wide.png",
-      "sizes": "1280x720",
+      "sizes": "1078x529",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Benny start screen"
+      "label": "Benny in play on mobile"
     },
     {
       "src": "assets/screenshot-narrow.png",
-      "sizes": "750x1334",
+      "sizes": "591x1213",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Benny start screen"
+      "label": "Benny in play on mobile"
     }
   ]
 }
