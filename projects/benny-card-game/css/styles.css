@@ -1057,6 +1057,86 @@ body.hand-dragging textarea {
 .card-zoom .card .corner .suit { font-size: 30px; }
 @keyframes zoom-fade-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
 
+/* ---------- Tutorial coach ----------
+   Two layouts:
+   - .tutorial-coach-bottom: a gold pill anchored above the hand bar; the
+     game is still visible and interactive so the user can tap the
+     highlighted UI element to satisfy the step.
+   - .tutorial-coach-center: a centered card with a Next/Finish button,
+     used for intro and outro steps. Has its own backdrop so it reads as a
+     standalone moment.
+   Highlighted targets get a pulsing gold ring via .tutorial-highlight. */
+.tutorial-coach {
+  position: fixed;
+  background: linear-gradient(180deg, #f7d27a, #e2a92e);
+  color: #1c2330;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tutorial-coach-bottom {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--card-h) + 96px);
+  z-index: 45;
+  width: calc(100% - 32px);
+  max-width: 380px;
+  /* Don't intercept taps — the user is meant to tap the highlighted UI
+     element underneath the coach text. */
+  pointer-events: none;
+}
+.tutorial-coach-center {
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 75;
+  width: calc(100% - 32px);
+  max-width: 380px;
+}
+.tutorial-coach-center::before {
+  /* Dim the rest of the screen to focus attention on the intro / outro. */
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: -1;
+}
+.tutorial-coach-body { font-size: 14px; }
+.tutorial-coach-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tutorial-coach-actions .pill.primary {
+  color: #fff;
+  background: linear-gradient(180deg, #4a90e2, #1f5fa0);
+  border-color: rgba(255,255,255,0.30);
+}
+
+.tutorial-highlight {
+  position: relative;
+  z-index: 30;
+  animation: tutorial-pulse 1.5s ease-in-out infinite;
+}
+@keyframes tutorial-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(245,196,81,0.9), 0 0 18px 4px rgba(245,196,81,0.45); }
+  50%      { box-shadow: 0 0 0 3px rgba(245,196,81,0.55), 0 0 6px 2px rgba(245,196,81,0.2); }
+}
+/* Card already has its own shadow tower — keep the pulse using outline so the
+   highlight ring stays visible even on .is-modern cards with overflow:visible. */
+.card.tutorial-highlight {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  animation: tutorial-card-pulse 1.5s ease-in-out infinite;
+}
+@keyframes tutorial-card-pulse {
+  0%, 100% { outline-color: rgba(245,196,81,0.95); }
+  50%      { outline-color: rgba(245,196,81,0.45); }
+}
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%);

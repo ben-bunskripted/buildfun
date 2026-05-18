@@ -54,10 +54,12 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
   };
 }
 
-export function startNextRound(state) {
+export function startNextRound(state, opts = {}) {
   state.round += 1;
   state.wildcardRank = WILDCARD_ORDER[state.round - 1];
-  state.deck = shuffleInPlace(buildDeck());
+  // Tutorial mode injects a fixed deck so the deal is predictable. Production
+  // play uses a fresh Fisher-Yates shuffle.
+  state.deck = opts.deck ? opts.deck.slice() : shuffleInPlace(buildDeck());
   state.discardPile = [];
   state.table = [];
   state.lastDrawnCardId = null;
