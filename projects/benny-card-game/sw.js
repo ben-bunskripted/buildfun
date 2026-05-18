@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "benny-v13";
+const CACHE = "benny-v17";
 
 const CARD_NAMES = [
   "1B","1J","2B","2J","2C","2D","2H","2S","3C","3D","3H","3S",
@@ -25,6 +25,7 @@ const SHELL = [
   "./js/storage.js",
   "./js/profiles.js",
   "./js/achievements.js",
+  "./js/tutorial.js",
   "./assets/favicon.png",
   "./assets/logo-bg.png",
   "./assets/icon-192.png",

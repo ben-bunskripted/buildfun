@@ -16,6 +16,7 @@ import {
   isScoringMatchOver, advanceScoringRound, scoringWinnerIndex,
 } from "./scoring.js";
 import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot } from "./storage.js";
+import * as tutorial from "./tutorial.js";
 import { loadProfiles, saveProfiles, buildMatchSummary, recordMatch, listKnownPlayers, achievementById, keyFor as profileKeyFor } from "./profiles.js";
 import { ACHIEVEMENTS, ALL_MODES, MODE_LABELS } from "./achievements.js";
 
@@ -68,6 +69,10 @@ let ui = {
 // ---------- Persistence ----------
 function persist() {
   if (!state) return;
+  // The tutorial match is ephemeral — never write it to localStorage so a
+  // reload doesn't leave the user a half-finished tutorial as a resumable
+  // game on the start screen.
+  if (state.isTutorial) return;
   storageSave({ mode: state.mode, state: serialize(state), ui: { mode: ui.mode } });
 }
 function discardSave() { storageClear(); }
@@ -171,6 +176,13 @@ function buildStart() {
   });
 
   $("start-btn").addEventListener("click", onStartMatch);
+  $("tutorial-btn").addEventListener("click", onStartTutorial);
+  $("tutorial-foot-btn").addEventListener("click", onStartTutorial);
+  $("tutorial-hide-btn").addEventListener("click", () => {
+    savePrefs({ ...loadPrefs(), hideTutorial: true });
+    applyTutorialVisibility();
+  });
+  applyTutorialVisibility();
 
   // Rules modal — opened from start screen, also from play / scoring top bars (wired in wireUp).
   const rulesModal = $("modal-rules");
@@ -449,6 +461,50 @@ function startScoringMatch() {
   goScoringRoundScreen();
 }
 
+// ---------- Tutorial entry ----------
+function applyTutorialVisibility() {
+  const row = $("tutorial-row");
+  if (!row) return;
+  // Once the user picks "Hide", the tutorial row stays hidden across reloads.
+  // Clearing localStorage is the escape hatch — first-time onboarding doesn't
+  // need a second-class re-show affordance.
+  row.classList.toggle("hidden", !!loadPrefs().hideTutorial);
+}
+
+function onStartTutorial() {
+  // The tutorial state is never persisted (see `persist()`), so an existing
+  // saved match remains untouched — no confirmation needed.
+  startTutorialMatch();
+}
+
+function startTutorialMatch() {
+  const humanName = (loadPrefs().userName || "").trim() || "You";
+  const names = [humanName, "Coach"];
+  const kinds = ["human", "cpu"];
+  const diffs = [undefined, "medium"];
+  // CPU is the dealer so the human draws on turn 1 (the standard turn shape).
+  state = createMatch(names, 1, { mode: "cpu", playerKinds: kinds, difficulties: diffs });
+  state.isTutorial = true;
+  startNextRound(state, { deck: tutorial.tutorialDeck() });
+  persist();
+  // Tutorial drives screen transitions via callbacks: it shows intro modals,
+  // then asks us to begin gameplay (which kicks off the CPU's dealer turn),
+  // and finally exits back to the start screen when the user finishes.
+  tutorial.startTutorial({
+    beginGameplay: () => { routeTurnStart(); },
+    exit: () => {
+      tutorial.endTutorial();
+      // Tutorial state was never persisted (see `persist()` / `isTutorial`),
+      // so dropping the in-memory state is enough — any prior real match
+      // snapshot on the start screen survives untouched.
+      state = null;
+      ui.selectedIds.clear();
+      renderResumeBanner();
+      showScreen("screen-start");
+    },
+  });
+}
+
 // ---------- Dealer reveal (slot-machine reel) ----------
 function runReveal(names, finalIndex, onDone) {
   const reel = $("reel");
@@ -522,7 +578,9 @@ function goPassScreen() {
     ui.selectedIds.clear();
     showScreen("screen-play");
     renderAll();
+    tutorial.notify("showHand");
   };
+  tutorial.notify("passScreenShown");
 }
 
 // ---------- CPU turn driver ----------
@@ -591,6 +649,9 @@ function renderAll() {
   renderMiddle();
   renderHand();
   renderActions();
+  // The tutorial highlights live nodes; re-apply after every re-render so the
+  // glow follows freshly-built hand cards / table cards.
+  tutorial.refreshHighlights();
 }
 
 function renderTopBar() {
@@ -795,8 +856,11 @@ function renderActions() {
   const canSwap = state.phase === "canAct" && me.hasOpened && wildsOnTable;
 
   $("play-set-btn").disabled = !canPlay;
-  $("add-set-btn").disabled = !canAdd;
-  $("swap-btn").disabled = !canSwap;
+  // Add-to-set and swap-wild aren't covered by the tutorial script; lock them
+  // off so a curious tap doesn't derail the scripted plays.
+  const inTutorial = tutorial.isTutorialActive();
+  $("add-set-btn").disabled = !canAdd || inTutorial;
+  $("swap-btn").disabled = !canSwap || inTutorial;
 }
 
 function escapeHTML(s) {
@@ -806,6 +870,9 @@ function escapeHTML(s) {
 // ---------- User interactions ----------
 function exitToStart() {
   if (state) persist();
+  // If the user bails mid-tutorial via Save & exit, tear down the coach so
+  // it doesn't linger on the start screen.
+  tutorial.endTutorial();
   state = null;
   ui.selectedIds.clear();
   renderResumeBanner();
@@ -870,9 +937,14 @@ function wireUp() {
     const card = e.target.closest(".card.in-hand");
     if (!card) return;
     const id = card.dataset.cardId;
+    // During specific tutorial steps, only the highlighted cards are tappable —
+    // keeps the user on the scripted path even if they reach for a stray card.
+    const allowed = tutorial.selectableCardIds();
+    if (allowed && !allowed.includes(id)) return;
     if (ui.selectedIds.has(id)) ui.selectedIds.delete(id);
     else ui.selectedIds.add(id);
     renderAll();
+    tutorial.notify("selectionChange", { selectedIds: ui.selectedIds });
   });
 
   // Drag reorder
@@ -890,6 +962,7 @@ function wireUp() {
     if (!r.ok) toast(r.reason);
     persist();
     renderAll();
+    if (r.ok) tutorial.notify("drawDeck");
   });
   $("discard-pile").addEventListener("click", () => {
     if (state.phase === "mustDraw") {
@@ -1020,6 +1093,7 @@ function doPlace(arrangement) {
   ui.selectedIds.clear();
   persist();
   renderAll();
+  tutorial.notify("playSet");
 }
 
 function chooseArrangement(arrangements, onPick) {
@@ -1202,6 +1276,7 @@ function openSwapModal() {
 
 function afterDiscard(result) {
   persist();
+  tutorial.notify("discard", { wonRound: !!result.wonRound });
   if (result.wonRound) goRoundEnd();
   else routeTurnStart();
 }
