@@ -13,6 +13,8 @@ const DRAG_THRESHOLD_PX = 6;
 export function makeHandReorderable(handEl, onReorder) {
   let active = null;
 
+  function preventNative(e) { e.preventDefault(); }
+
   function findCard(target) {
     let el = target;
     while (el && el !== handEl) {
@@ -82,6 +84,16 @@ export function makeHandReorderable(handEl, onReorder) {
       card.style.width = w + "px";
       card.classList.add("dragging");
       ctx.moveSuppressedClick = true;
+
+      // While dragging, suppress the browser's native long-press behaviors —
+      // on Android Chrome a still finger turns into a text-selection callout
+      // that interrupts the drag and snaps the card back. These listeners
+      // (registered globally, removed in cleanup) catch the events that the
+      // per-element `user-select: none` / `touch-action: none` can't reach
+      // once the finger drifts off the card.
+      window.addEventListener("selectstart", preventNative, true);
+      window.addEventListener("contextmenu", preventNative, true);
+      document.body.classList.add("hand-dragging");
     };
 
     if (isTouch) {
@@ -151,13 +163,14 @@ export function makeHandReorderable(handEl, onReorder) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("selectstart", preventNative, true);
+      window.removeEventListener("contextmenu", preventNative, true);
+      document.body.classList.remove("hand-dragging");
       if (ctx.timer) clearTimeout(ctx.timer);
 
       if (ctx.dragging) {
         // Determine drop position.
         const slotEls = [...handEl.children];
-        const placeholderIdx = slotEls.indexOf(ctx.placeholder);
-        const originalIdx = slotEls.indexOf(card);
         let fromIndex = -1;
         // The card is still in DOM with position:fixed; its DOM index pre-existed.
         // Recompute "from" by ignoring placeholder.
@@ -187,7 +200,12 @@ export function makeHandReorderable(handEl, onReorder) {
         card.classList.remove("dragging");
         ctx.placeholder.replaceWith(card);
 
-        if (commit && fromIndex !== -1 && fromIndex !== toIndex) {
+        // Always re-render the hand on drop, even when the card lands in its
+        // original slot. Otherwise the dragged DOM node keeps its identity
+        // and the prior `position:fixed` / .dragging cycle can leave it
+        // floating above its neighbors in the fan stack until the next
+        // render. A no-op splice on same-position keeps state consistent.
+        if (commit && fromIndex !== -1) {
           onReorder(fromIndex, toIndex);
         }
       }
