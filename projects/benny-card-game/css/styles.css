@@ -1163,6 +1163,39 @@ body.hand-dragging textarea {
   50%      { outline-color: rgba(245,196,81,0.45); }
 }
 
+/* ---------- Update banner ----------
+   Surfaces a "new version downloaded" prompt when a fresh service worker
+   has finished installing and is waiting to activate. Persistent (unlike
+   the toast) until the user refreshes or dismisses. */
+.update-banner {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: rgba(8, 24, 50, 0.95);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 8px 12px 8px 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 90;
+  box-shadow: var(--shadow-lg);
+  max-width: calc(100% - 32px);
+  font-size: 14px;
+}
+.update-banner .pill { padding: 6px 14px; font-size: 13px; }
+.update-banner-dismiss {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,0.7);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.update-banner-dismiss:hover { color: #fff; }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; left: 50%; bottom: 80px; transform: translateX(-50%);
