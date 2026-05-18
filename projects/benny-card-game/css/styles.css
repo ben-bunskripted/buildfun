@@ -989,6 +989,13 @@ body.hand-dragging textarea {
 }
 .text-link:hover { color: var(--accent-deep); }
 
+.tutorial-row {
+  display: flex; justify-content: center; align-items: baseline;
+  gap: 4px;
+}
+.tutorial-row .text-link { display: inline-block; margin-top: 6px; }
+.tutorial-hide { font-size: 12px; opacity: 0.7; }
+
 .feedback-textarea {
   width: 100%; min-height: 110px; resize: vertical; font-family: inherit;
 }
@@ -1108,13 +1115,29 @@ body.hand-dragging textarea {
   background: rgba(0,0,0,0.55);
   z-index: -1;
 }
-.tutorial-coach-body { font-size: 14px; }
+.tutorial-coach-body { font-size: 14px; padding-right: 44px; }
 .tutorial-coach-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .tutorial-coach-actions .pill.primary {
   color: #fff;
   background: linear-gradient(180deg, #4a90e2, #1f5fa0);
   border-color: rgba(255,255,255,0.30);
 }
+.tutorial-coach-skip {
+  position: absolute;
+  top: 6px; right: 8px;
+  appearance: none;
+  background: rgba(0,0,0,0.10);
+  border: 1px solid rgba(0,0,0,0.20);
+  border-radius: 999px;
+  color: #1c2330;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;  /* override coach-bottom's pointer-events:none */
+}
+.tutorial-coach-skip:hover { background: rgba(0,0,0,0.20); }
 
 .tutorial-highlight {
   position: relative;

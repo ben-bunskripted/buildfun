@@ -177,6 +177,11 @@ function buildStart() {
 
   $("start-btn").addEventListener("click", onStartMatch);
   $("tutorial-btn").addEventListener("click", onStartTutorial);
+  $("tutorial-hide-btn").addEventListener("click", () => {
+    savePrefs({ ...loadPrefs(), hideTutorial: true });
+    applyTutorialVisibility();
+  });
+  applyTutorialVisibility();
 
   // Rules modal — opened from start screen, also from play / scoring top bars (wired in wireUp).
   const rulesModal = $("modal-rules");
@@ -456,6 +461,15 @@ function startScoringMatch() {
 }
 
 // ---------- Tutorial entry ----------
+function applyTutorialVisibility() {
+  const row = $("tutorial-row");
+  if (!row) return;
+  // Once the user picks "Hide", the tutorial row stays hidden across reloads.
+  // Clearing localStorage is the escape hatch — first-time onboarding doesn't
+  // need a second-class re-show affordance.
+  row.classList.toggle("hidden", !!loadPrefs().hideTutorial);
+}
+
 function onStartTutorial() {
   // The tutorial state is never persisted (see `persist()`), so an existing
   // saved match remains untouched — no confirmation needed.

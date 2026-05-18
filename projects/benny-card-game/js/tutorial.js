@@ -264,8 +264,13 @@ function ensureCoachEl() {
   coachEl.id = "tutorial-coach";
   coachEl.className = "tutorial-coach hidden";
   coachEl.innerHTML = `
+    <button type="button" class="tutorial-coach-skip" aria-label="Skip tutorial">Skip</button>
     <div class="tutorial-coach-body"></div>
     <div class="tutorial-coach-actions"></div>
   `;
+  coachEl.querySelector(".tutorial-coach-skip").addEventListener("click", () => {
+    if (callbacks && callbacks.exit) callbacks.exit();
+    else endTutorial();
+  });
   document.body.appendChild(coachEl);
 }
