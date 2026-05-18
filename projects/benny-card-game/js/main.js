@@ -699,6 +699,34 @@ function renderHand() {
     hand.appendChild(el);
   }
   $("hand-hint").textContent = handHint();
+  layoutHand();
+}
+
+// Fan the hand: pick a per-card horizontal step so every card fits in the
+// container, overlapping toward the right when necessary. The top-left corner
+// stays visible on every card (later DOM siblings paint above earlier ones).
+function layoutHand() {
+  const hand = $("hand");
+  if (!hand) return;
+  const cards = hand.querySelectorAll(".card");
+  const n = cards.length;
+  if (n === 0) {
+    hand.style.setProperty("--hand-overlap", "6px");
+    return;
+  }
+  const cardW = parseFloat(getComputedStyle(cards[0]).width) || 58;
+  const cs = getComputedStyle(hand);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const available = hand.clientWidth - padX;
+  const naturalGap = 6;
+  const naturalWidth = n * cardW + (n - 1) * naturalGap;
+  if (n === 1 || naturalWidth <= available) {
+    hand.style.setProperty("--hand-overlap", `${naturalGap}px`);
+    return;
+  }
+  // cardW + (n - 1) * step = available  →  step = (available - cardW) / (n - 1)
+  const step = (available - cardW) / (n - 1);
+  hand.style.setProperty("--hand-overlap", `${step - cardW}px`);
 }
 
 function handHint() {
@@ -1324,6 +1352,7 @@ function boot() {
   wireUp();
   renderResumeBanner();
   setupCardZoom();
+  window.addEventListener("resize", layoutHand);
   showScreen("screen-start");
 }
 document.addEventListener("DOMContentLoaded", boot);
