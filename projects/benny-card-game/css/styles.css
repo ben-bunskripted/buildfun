@@ -613,8 +613,10 @@ body {
   min-height: calc(var(--card-h) + 16px);
 }
 .hand > .card + .card { margin-left: var(--hand-overlap, 6px); }
-.hand > .card.selected,
-.hand > .card.just-drawn { z-index: 10; }
+/* Selected cards lift via z-index so they pop above the fan; just-drawn ones
+   intentionally stack by source order, otherwise dragging the gold-glow card
+   into the middle of the fan leaves it sitting on top of every neighbor. */
+.hand > .card.selected { z-index: 10; }
 
 /* Fanned hand — heavy overlap and per-card rotation around a pivot below the
    row, so the cards look held in a real hand. layoutHand() in main.js sets
