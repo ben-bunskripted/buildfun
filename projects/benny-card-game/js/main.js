@@ -6,7 +6,7 @@ import {
   createMatch, startNextRound, beginTurn, currentPlayer, topOfDiscard,
   drawFromDeck, drawFromDiscard, placeNewSet, addToSet, swapWildcard,
   discard, isMatchOver, advanceToNextRound, matchWinnerIndex,
-  WILDCARD_ORDER, TOTAL_ROUNDS, serialize, hydrate,
+  WILDCARD_ORDER, ROUND_NAMES, TOTAL_ROUNDS, serialize, hydrate,
 } from "./game.js";
 import { validateNewSet, validateAddition, describeRunArrangement, describeAddition } from "./rules.js";
 import { makeHandReorderable } from "./dragdrop.js";
@@ -482,8 +482,17 @@ function runReveal(names, finalIndex, onDone) {
 function routeTurnStart() {
   if (state.phase === "roundOver") { goRoundEnd(); return; }
   const p = currentPlayer(state);
-  if (p.kind === "cpu") runCpuTurn();
-  else goPassScreen();
+  if (p.kind === "cpu") { runCpuTurn(); return; }
+  // Resume-mid-turn: phase already advanced past "passing" before the snapshot,
+  // so don't show the pass screen (which would call beginTurn and clobber phase
+  // back to "mustDraw", letting the player draw a second time).
+  if (state.phase === "mustDraw" || state.phase === "canAct") {
+    ui.selectedIds.clear();
+    showScreen("screen-play");
+    renderAll();
+    return;
+  }
+  goPassScreen();
 }
 
 // ---------- Pass-to-player screen ----------
@@ -565,32 +574,31 @@ function showCpuRecap(playerName, plan, roundWon) {
 // ---------- Play screen rendering ----------
 function renderAll() {
   renderTopBar();
-  renderOthers();
+  renderAllMelds();
   renderMiddle();
-  renderSelfMelds();
   renderHand();
   renderActions();
 }
 
 function renderTopBar() {
-  $("bar-round").textContent = state.round;
+  $("bar-round").textContent = ROUND_NAMES[state.round - 1] || state.round;
   $("bar-wild").textContent = state.wildcardRank;
   $("bar-turn").textContent = currentPlayer(state).name;
 }
 
-function renderOthers() {
-  const wrap = $("others");
+function renderAllMelds() {
+  const wrap = $("all-melds");
   wrap.innerHTML = "";
   for (let i = 0; i < state.players.length; i++) {
-    if (i === state.currentPlayerIndex) continue;
     const p = state.players[i];
     const row = document.createElement("div");
     row.className = "other-player";
+    if (i === state.currentPlayerIndex) row.classList.add("is-current");
     const head = document.createElement("div");
     head.className = "other-player-head";
     const name = document.createElement("div");
     name.className = "player-name";
-    name.textContent = p.name;
+    name.textContent = i === state.currentPlayerIndex ? `${p.name} (you)` : p.name;
     if (i === state.dealerIndex) {
       const chip = document.createElement("span");
       chip.className = "dealer-chip";
@@ -623,7 +631,9 @@ function renderPlayerMelds(playerIdx) {
     const empty = document.createElement("div");
     empty.className = "muted";
     empty.style.fontSize = "12px";
-    empty.textContent = "No sets played yet.";
+    empty.textContent = playerIdx === state.currentPlayerIndex
+      ? "Play 3+ matching cards to open this round."
+      : "No sets played yet.";
     container.appendChild(empty);
     return container;
   }
@@ -640,7 +650,7 @@ function renderMeld(set) {
   for (let i = 0; i < set.cards.length; i++) {
     const c = set.cards[i];
     const opts = c.isWild
-      ? { wild: true, represents: { rank: c.representsRank, suit: c.representsSuit || (set.type === "number" ? c.card.suit : c.representsSuit) } }
+      ? { wild: true, represents: { rank: c.representsRank, suit: set.type === "run" ? c.representsSuit : null } }
       : {};
     const cardEl = renderCard(c.card, opts);
     cardEl.dataset.positionIndex = String(i);
@@ -674,29 +684,6 @@ function renderMiddle() {
   discardBtn.classList.toggle("is-active", discardActive);
   drawBtn.disabled = state.phase !== "mustDraw";
   discardBtn.disabled = !discardActive;
-}
-
-function renderSelfMelds() {
-  const wrap = $("self-melds");
-  wrap.innerHTML = "";
-  const head = document.createElement("div");
-  head.className = "self-melds-head";
-  const me = currentPlayer(state);
-  head.innerHTML = `<span><strong>${escapeHTML(me.name)}</strong> &middot; Score ${me.score}</span><span class="muted">Your sets</span>`;
-  wrap.appendChild(head);
-  const ml = document.createElement("div");
-  ml.className = "melds";
-  const sets = state.table.filter(s => s.ownerIndex === state.currentPlayerIndex);
-  if (!sets.length) {
-    const empty = document.createElement("div");
-    empty.className = "muted";
-    empty.style.fontSize = "12px";
-    empty.textContent = "Play 3+ matching cards to open this round.";
-    ml.appendChild(empty);
-  } else {
-    sets.forEach(s => ml.appendChild(renderMeld(s)));
-  }
-  wrap.appendChild(ml);
 }
 
 function renderHand() {
@@ -805,7 +792,7 @@ function wireUp() {
   // Sort button
   $("sort-btn").addEventListener("click", () => {
     const me = currentPlayer(state);
-    me.hand = [...me.hand].sort(compareForSort);
+    me.hand = [...me.hand].sort((a, b) => compareForSort(a, b, state.wildcardRank));
     renderHand();
   });
 
@@ -962,7 +949,7 @@ function openAddToSetModal() {
     const cardsEl = document.createElement("div");
     cardsEl.className = "set-row-cards";
     for (const c of opt.set.cards) {
-      const opts = c.isWild ? { wild: true, represents: { rank: c.representsRank, suit: c.representsSuit || c.card.suit } } : {};
+      const opts = c.isWild ? { wild: true, represents: { rank: c.representsRank, suit: opt.set.type === "run" ? c.representsSuit : null } } : {};
       cardsEl.appendChild(renderCard(c.card, opts));
     }
     row.appendChild(cardsEl);
@@ -1028,7 +1015,7 @@ function openSwapModal() {
       row.appendChild(info);
       const preview = document.createElement("div");
       preview.className = "set-row-cards";
-      const wildPreview = renderCard(c.card, { wild: true, represents: { rank: needRank, suit: needSuit || c.card.suit } });
+      const wildPreview = renderCard(c.card, { wild: true, represents: { rank: needRank, suit: needSuit } });
       preview.appendChild(wildPreview);
       row.appendChild(preview);
 
@@ -1069,7 +1056,7 @@ function afterDiscard(result) {
 // ---------- Scoring-mode screen ----------
 function goScoringRoundScreen() {
   showScreen("screen-scoring");
-  $("sc-round").textContent = state.round;
+  $("sc-round").textContent = ROUND_NAMES[state.round - 1] || state.round;
   $("sc-wild").textContent = state.wildcardRank;
   $("sc-dealer").textContent = state.players[state.dealerIndex].name;
 
@@ -1166,7 +1153,7 @@ function onScoringSubmit() {
 function goRoundEnd() {
   showScreen("screen-round-end");
   const winnerIdx = state.roundWinner;
-  $("round-end-title").textContent = `Round ${state.round} complete`;
+  $("round-end-title").textContent = `Round ${ROUND_NAMES[state.round - 1] || state.round} complete`;
   $("round-end-winner").innerHTML = `<strong>${escapeHTML(state.players[winnerIdx].name)}</strong> took the round.`;
   const tbody = $("round-end-rows");
   tbody.innerHTML = "";
@@ -1177,7 +1164,7 @@ function goRoundEnd() {
     tr.innerHTML = `<td>${escapeHTML(p.name)}</td><td>${state.perRoundScores[i]}</td><td><strong>${p.score}</strong></td>`;
     tbody.appendChild(tr);
   }
-  $("continue-btn").textContent = state.round >= TOTAL_ROUNDS ? "See match result" : `Continue to round ${state.round + 1}`;
+  $("continue-btn").textContent = state.round >= TOTAL_ROUNDS ? "See match result" : `Continue to round ${ROUND_NAMES[state.round] || state.round + 1}`;
 }
 
 function goMatchEnd() {
@@ -1193,8 +1180,25 @@ function goMatchEnd() {
     tr.innerHTML = `<td>${escapeHTML(p.name)}</td><td><strong>${p.score}</strong></td>`;
     tbody.appendChild(tr);
   }
+  renderMatchEndHistory();
   buildConfetti();
   discardSave();
+}
+
+function renderMatchEndHistory() {
+  const host = $("match-end-history");
+  if (!host) return;
+  const history = Array.isArray(state.roundHistory) ? state.roundHistory : [];
+  if (!history.length) { host.innerHTML = ""; return; }
+  const head = `<tr><th>R</th>${state.players.map(p => `<th>${escapeHTML(p.name)}</th>`).join("")}</tr>`;
+  const body = history.map(h => {
+    const label = ROUND_NAMES[h.round - 1] || h.round;
+    const cells = h.scores.map((s, i) =>
+      `<td class="${i === h.winnerIdx ? "winner" : ""}">${s}</td>`).join("");
+    return `<tr><td class="r-col">${label}</td>${cells}</tr>`;
+  }).join("");
+  host.innerHTML = `<h3 class="sc-history-title">Round-by-round</h3>
+    <table class="sc-history-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 // ---------- Resume from saved match ----------

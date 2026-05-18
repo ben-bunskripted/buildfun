@@ -140,7 +140,7 @@
   <section id="screen-play" class="screen">
     <header class="top-bar">
       <a class="top-bar-logo-link" href="./" aria-label="Back to Benny home"><img class="top-bar-logo" src="assets/favicon.png" alt="Benny" /></a>
-      <div class="badge round-badge"><span class="badge-label">Round</span><span id="bar-round">1</span><span class="muted">/14</span></div>
+      <div class="badge round-badge"><span class="badge-label">Round</span><span id="bar-round">A</span><span class="muted">/14</span></div>
       <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="bar-wild">A</span></div>
       <div class="badge turn-badge"><span class="badge-label">Turn</span><span id="bar-turn"></span></div>
       <button type="button" class="pill ghost top-bar-help" id="play-rules-btn" aria-label="How to play" title="How to play">?</button>
@@ -149,7 +149,7 @@
     </header>
 
     <div class="table-area" id="table-area">
-      <div class="others" id="others"></div>
+      <div class="all-melds" id="all-melds"></div>
 
       <div class="middle">
         <div class="pile-wrap">
@@ -166,8 +166,6 @@
           <span class="pile-label">Discard</span>
         </div>
       </div>
-
-      <div class="self-melds" id="self-melds"></div>
     </div>
 
     <div class="hand-section" id="hand-section">
@@ -189,7 +187,7 @@
   <section id="screen-scoring" class="screen">
     <header class="top-bar">
       <a class="top-bar-logo-link" href="./" aria-label="Back to Benny home"><img class="top-bar-logo" src="assets/favicon.png" alt="Benny" /></a>
-      <div class="badge round-badge"><span class="badge-label">Round</span><span id="sc-round">1</span><span class="muted">/14</span></div>
+      <div class="badge round-badge"><span class="badge-label">Round</span><span id="sc-round">A</span><span class="muted">/14</span></div>
       <div class="badge wild-badge"><span class="badge-label">Wild</span><span id="sc-wild">A</span></div>
       <div class="badge turn-badge"><span class="badge-label">Dealer</span><span id="sc-dealer"></span></div>
       <button type="button" class="pill ghost top-bar-help" id="scoring-rules-btn" aria-label="How to play" title="How to play">?</button>
@@ -230,6 +228,7 @@
         <thead><tr><th>Player</th><th>Final score</th></tr></thead>
         <tbody id="match-end-rows"></tbody>
       </table>
+      <div id="match-end-history" class="match-end-history"></div>
       <button id="new-match-btn" class="pill primary big">New match</button>
     </div>
   </section>
@@ -298,7 +297,7 @@
         <p>Lowest total score wins after 14 rounds.</p>
 
         <h4>Rounds and wildcards</h4>
-        <p>There are 14 rounds. The wild rank changes each round: A, 2, 3, 4, 5, 6, 7, 8, 9, 10, J, Q, K, then A again.</p>
+        <p>There are 14 rounds. The wild rank changes each round: A, 2, 3, 4, 5, 6, 7, 8, 9, 10, J, Q, K, then A again &mdash; shown as A* to mark the final round.</p>
 
         <h4>Dealing</h4>
         <p>Each player starts with 7 cards. The dealer gets 8 cards and starts the round by discarding one card, so everyone then has 7.</p>

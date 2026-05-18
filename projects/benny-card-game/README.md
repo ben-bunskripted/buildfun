@@ -26,7 +26,7 @@ the tab or reloading offers a **Resume match** banner.
 From inside this folder:
 
 ```
-python3 -m http.server 8000
+python -m http.server 8000
 ```
 
 Then open `http://localhost:8000` in your browser. (Any static file server

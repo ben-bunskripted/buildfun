@@ -25,7 +25,13 @@ export const CARD_POINTS = {
 // Stable suit ordering used only as tiebreaker when sorting by value.
 const SUIT_ORDER = { S: 0, H: 1, D: 2, C: 3 };
 
-export function compareForSort(a, b) {
+export function compareForSort(a, b, wildRank) {
+  if (wildRank) {
+    const aw = a.rank === wildRank;
+    const bw = b.rank === wildRank;
+    if (aw && !bw) return -1;
+    if (bw && !aw) return 1;
+  }
   const dv = RANK_VALUE[b.rank] - RANK_VALUE[a.rank];
   if (dv !== 0) return dv;
   return SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit];
@@ -147,39 +153,47 @@ function portraitSVG(rank) {
 
 // Renders a card DOM element. Options:
 //   wild      → marks this card as a wildcard (rank matches round's wildcard rank)
-//   represents → {rank, suit} when wildcard is sitting in a set, used to render the
-//                represented card UNDER the wild banner.
+//   represents → {rank, suit} when wildcard is sitting in a set. The underlying
+//                card art stays the original wildcard; the wild banner shows the
+//                represented rank+suit so you can see what it stands in for.
 export function renderCard(card, opts = {}) {
   const el = document.createElement("div");
-  const baseSuit = opts.represents ? opts.represents.suit : card.suit;
-  const baseRank = opts.represents ? opts.represents.rank : card.rank;
   el.className = "card";
-  if (CARD_STYLE === "classic") el.classList.add(suitColorClass(baseSuit));
+  if (CARD_STYLE === "classic") el.classList.add(suitColorClass(card.suit));
+  else el.classList.add("is-modern");
   if (opts.wild) el.classList.add("is-wild");
   if (opts.className) el.classList.add(...opts.className.split(" "));
   el.dataset.cardId = card.id;
 
+  const wildBanner = opts.wild ? wildBannerHTML(opts.represents) : ``;
+
   if (CARD_STYLE === "classic") {
-    const rankLabel = baseRank;
     el.innerHTML = `
       <div class="corner top-left">
-        <span class="rank">${rankLabel}</span>
-        <span class="suit">${SUIT_GLYPH[baseSuit]}</span>
+        <span class="rank">${card.rank}</span>
+        <span class="suit">${SUIT_GLYPH[card.suit]}</span>
       </div>
-      ${buildFaceHTML(baseRank, baseSuit)}
+      ${buildFaceHTML(card.rank, card.suit)}
       <div class="corner bottom-right">
-        <span class="rank">${rankLabel}</span>
-        <span class="suit">${SUIT_GLYPH[baseSuit]}</span>
+        <span class="rank">${card.rank}</span>
+        <span class="suit">${SUIT_GLYPH[card.suit]}</span>
       </div>
-      ${opts.wild ? `<img class="wild-banner" src="assets/wildcard.png" alt="Wild" draggable="false">` : ``}
+      ${wildBanner}
     `;
   } else {
     el.innerHTML = `
-      <img class="card-art" src="assets/cards/${assetName(baseRank, baseSuit)}" alt="${baseRank}${baseSuit}" draggable="false">
-      ${opts.wild ? `<img class="wild-banner" src="assets/wildcard.png" alt="Wild" draggable="false">` : ``}
+      <img class="card-art" src="assets/cards/${assetName(card.rank, card.suit)}" alt="${card.rank}${card.suit}" draggable="false">
+      ${wildBanner}
     `;
   }
   return el;
+}
+
+function wildBannerHTML(represents) {
+  const rep = represents
+    ? `<span class="wild-banner-rep">${represents.rank}${SUIT_GLYPH[represents.suit] || ""}</span>`
+    : ``;
+  return `<div class="wild-banner"><span class="wild-banner-label">WILD</span>${rep}</div>`;
 }
 
 export function renderCardBack() {

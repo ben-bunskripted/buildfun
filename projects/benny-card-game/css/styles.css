@@ -23,9 +23,10 @@
   --accent-deep: #1f5fa0;
   --danger: #d96a5b;
 
-  --card-w: 64px;
+  /* Card dimensions follow the bridge-size SVG aspect ratio 212:329 (~0.644). */
+  --card-w: 58px;
   --card-h: 90px;
-  --card-radius: 8px;
+  --card-radius: 3mm;
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.16), 0 1px 1px rgba(0,0,0,0.10);
   --shadow-md: 0 6px 16px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.16);
@@ -33,10 +34,10 @@
 }
 
 @media (min-width: 720px) {
-  :root { --card-w: 84px; --card-h: 118px; --card-radius: 10px; }
+  :root { --card-w: 76px; --card-h: 118px; }
 }
 @media (min-width: 1100px) {
-  :root { --card-w: 96px; --card-h: 134px; --card-radius: 12px; }
+  :root { --card-w: 86px; --card-h: 134px; }
 }
 
 * { box-sizing: border-box; }
@@ -371,7 +372,7 @@ body {
   padding: 12px;
   min-height: 0;
 }
-.others {
+.all-melds {
   display: flex; flex-direction: column; gap: 10px;
 }
 .other-player {
@@ -423,9 +424,17 @@ body {
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
   cursor: default;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
+.meld::-webkit-scrollbar { display: none; }
 .meld.selectable { cursor: pointer; outline: 2px dashed transparent; transition: outline-color 0.15s; }
 .meld.selectable:hover { outline-color: rgba(245,196,81,0.6); }
+@media (max-width: 720px) {
+  .melds { flex-direction: column; flex-wrap: nowrap; }
+  .meld { width: 100%; }
+}
 
 .middle {
   display: flex; justify-content: center; gap: 18px;
@@ -456,15 +465,6 @@ body {
 .pile.is-active .pile-card-host {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
-}
-
-.self-melds {
-  display: flex; flex-direction: column; gap: 8px;
-  padding-top: 4px;
-}
-.self-melds-head {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 13px; color: var(--muted);
 }
 
 /* ---------- Hand ---------- */
@@ -521,7 +521,19 @@ body {
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
-  border-radius: inherit;
+}
+
+/* Modern SVG cards already have their own white fill, black stroke and rounded
+   corners. Let them render unclipped so the corner rank/suit indicators aren't
+   sliced off, and route the drop shadow to the SVG itself. */
+.card.is-modern {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+}
+.card.is-modern .card-art {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.18)) drop-shadow(0 2px 4px rgba(0,0,0,0.12));
 }
 
 /* Classic-style card internals (used when the user picks the classic renderer). */
@@ -626,41 +638,39 @@ body {
   border-color: rgba(201,150,58,0.55);
   box-shadow: 0 0 0 1px rgba(245,196,81,0.35) inset, var(--shadow-sm);
 }
-.card.is-wild .wild-badge-mark {
-  position: absolute;
-  inset: auto 0 0 0;
-  display: flex; align-items: center; justify-content: center;
-  pointer-events: none;
-}
 .card.is-wild .wild-banner {
   position: absolute; left: 50%; top: 50%;
-  width: 82%; height: auto;
+  width: 78%;
   transform: translate(-50%, -50%) rotate(-10deg);
   pointer-events: none;
   user-select: none;
-  -webkit-user-drag: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px;
+  padding: 4px 8px;
+  background: linear-gradient(180deg, var(--gold), var(--gold-deep));
+  color: #2a1d05;
+  border: 1px solid rgba(72, 47, 8, 0.55);
+  border-radius: 6px;
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.45));
+  text-align: center;
+  line-height: 1;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
-.card.is-wild .star-mark {
-  position: absolute; right: 6px; top: 6px;
-  width: 14px; height: 14px;
-  color: var(--gold-deep);
-  opacity: 0.85;
+.card.is-wild .wild-banner-label {
+  font-size: calc(var(--card-w) * 0.18);
 }
-
-/* Meld card sizing (smaller, in tableau) */
-.meld .card {
-  --card-w: 38px;
-  --card-h: 54px;
+.card.is-wild .wild-banner-rep {
+  font-size: calc(var(--card-w) * 0.22);
+  letter-spacing: 0;
+  font-weight: 800;
 }
 @media (min-width: 720px) {
-  .meld .card {
-    --card-w: 48px;
-    --card-h: 68px;
-  }
+  .card.is-wild .wild-banner { width: 64%; padding: 5px 10px; }
 }
-.meld .card .corner .rank { font-size: 11px; }
-.meld .card .corner .suit { font-size: 9px; }
+
+/* Meld cards inherit hand-card size — no overrides. */
 
 /* ---------- Round end / Match end ---------- */
 #screen-round-end, #screen-match-end { align-items: center; justify-content: center; padding: 24px; }
@@ -680,6 +690,8 @@ body {
   content: "🏆 ";
 }
 .match-end-panel .trophy { font-size: 28px; margin: 0 0 6px; }
+.match-end-history { margin: 4px 0 18px; }
+.match-end-history:empty { display: none; }
 #new-match-btn, #continue-btn { width: 100%; }
 
 /* Confetti */
@@ -766,7 +778,7 @@ body {
 .set-row-info { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ink-soft); flex: 1; }
 .set-row-info strong { color: var(--ink); font-size: 14px; }
 .set-row-cards { display: flex; gap: 3px; }
-.set-row-cards .card { --card-w: 30px; --card-h: 44px; }
+.set-row-cards .card { --card-w: 28px; --card-h: 44px; }
 .set-row-cards .card .corner .rank { font-size: 9px; }
 .set-row-cards .card .corner .suit { font-size: 7px; }
 
@@ -782,7 +794,7 @@ body {
 }
 .card-zoom.hidden { display: none !important; }
 .card-zoom .card {
-  --card-w: 240px;
+  --card-w: 216px;
   --card-h: 336px;
   --card-radius: 18px;
   box-shadow: var(--shadow-lg);
@@ -810,12 +822,12 @@ body {
 
 /* ---------- Responsiveness helpers ---------- */
 @media (max-width: 380px) {
-  :root { --card-w: 56px; --card-h: 80px; }
+  :root { --card-w: 52px; --card-h: 80px; }
   .top-bar { padding: 8px; }
   .badge { padding: 5px 9px; font-size: 12px; }
 }
 @media (min-width: 900px) {
   .table-area { padding: 18px 20px; }
-  .others { flex-direction: row; flex-wrap: wrap; }
+  .all-melds { flex-direction: row; flex-wrap: wrap; }
   .other-player { flex: 1 1 240px; min-width: 240px; }
 }

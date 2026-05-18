@@ -29,9 +29,10 @@ benny-card-game/
 └── assets/
     ├── favicon.png         # gold "WILD" tile — favicon + apple-touch-icon + top-bar logo
     ├── logo-bg.png         # full Benny banner with cards + tagline — start-screen hero
-    ├── wildcard.png        # gold tile drawn on top of any wildcard in play
-    └── cards/              # 56 full-card SVGs (52 cards + 2 backs + 2 jokers unused)
-                            # filename = rank+suit, "10" → "T" (e.g. AS.svg, TC.svg)
+    └── cards/              # Bridge-size SVG cards (212×329 viewBox, ratio ~0.644).
+                            # 52 used (rank+suit, "10" → "T", e.g. AS.svg, TC.svg).
+                            # Backs/jokers (1B/2B, 1J/2J, "Back (n)") are unused —
+                            # card backs are CSS-built via .card.back in styles.css.
 ```
 
 ## Card rendering — two modes
@@ -43,11 +44,13 @@ Set at boot from `loadPrefs().cardStyle`, toggled on the start screen, persisted
 
 Both modes share the same outer `.card` div (size, shadow, hover/selected/dragging/just-drawn states). The CSS rules for `.card-art` and `.card .corner/.face/.pip/.portrait` target disjoint inner elements so they coexist without conflict.
 
-`renderCard(card, opts)` opts: `{ wild, represents: {rank, suit}, className }`. When `represents` is set, the card art shows the *represented* card (used when a wildcard sits in a meld), with a wildcard tile overlaid via `.wild-banner`.
+`renderCard(card, opts)` opts: `{ wild, represents: {rank, suit}, className }`. The underlying art is always the actual card (the wildcard itself when `wild` is true). When `represents` is set, the represented rank+suit is shown inside the wild banner so you can see what the wildcard stands in for.
+
+In modern mode `renderCard` also tags the element with `is-modern` — CSS uses that class to render the card unclipped (so the SVG's intrinsic corner rank/suit indicators aren't sliced off by the outer 3mm border-radius).
 
 ## Wildcard banner
 
-Image overlay (`assets/wildcard.png`), centred, rotated −10°, 55% of card width on mobile, 82% at ≥720 px (≈50% larger on desktop). Renders over the underlying card art whenever `opts.wild` is true.
+DOM-built gold plaque (`<div class="wild-banner"><span class="wild-banner-label">WILD</span><span class="wild-banner-rep">…</span></div>`), centred, rotated −10°. The `wild-banner-rep` line only renders when `opts.represents` is set, showing e.g. `7♥`. Sized as a fraction of `--card-w` so it scales with the card.
 
 ## Theme
 
@@ -78,7 +81,7 @@ Benny is an installable PWA scoped to `./` (so it's self-contained inside `proje
 - `manifest.webmanifest` — `display: standalone`, portrait, navy theme/background. Icons at `assets/icon-192.png` and `assets/icon-512.png` (generated from `favicon.png`, declared `"any maskable"` so Android adaptive cropping keeps the B visible).
 - `sw.js` — cache-first service worker. On install, pre-caches the full shell: HTML, CSS, all JS modules, the three asset PNGs, both icons, and all 56 card SVGs. POSTs pass through (so the Netlify feedback form still works). Offline navigations fall back to `./index.html`. Registered at end of `index.html` after the main module loads.
 
-**Bump the cache version on every deploy that changes a shell file.** The `CACHE = "benny-v1"` constant at the top of `sw.js` is the cache key; the activate handler deletes any cache whose key doesn't match. Bumping (e.g. to `"benny-v2"`) is what forces installed clients to re-fetch updated JS/CSS/assets — otherwise users keep getting the old cached copy until their browser eventually expires the SW.
+**Bump the cache version on every deploy that changes a shell file.** The `CACHE = "benny-vN"` constant at the top of `sw.js` is the cache key; the activate handler deletes any cache whose key doesn't match. Bumping (e.g. v3 → v4) is what forces installed clients to re-fetch updated JS/CSS/assets — otherwise users keep getting the old cached copy until their browser eventually expires the SW.
 
 ## Save & exit
 

@@ -4,6 +4,9 @@ import { buildDeck, RANKS, CARD_POINTS, isWildcard } from "./cards.js";
 import { shuffleInPlace } from "./rng.js";
 
 export const WILDCARD_ORDER = ["A","2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+// Display labels per round. Distinct from WILDCARD_ORDER because the final round
+// reuses the A wild rank but is labelled A* so players know it's the last one.
+export const ROUND_NAMES = ["A","2","3","4","5","6","7","8","9","10","J","Q","K","A*"];
 export const TOTAL_ROUNDS = WILDCARD_ORDER.length; // 14
 export const STATE_VERSION = 1;
 
@@ -42,6 +45,7 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     setIdCounter: 0,
     roundWinner: null,
     perRoundScores: [],
+    roundHistory: [],
   };
 }
 
@@ -296,6 +300,14 @@ function finalizeRoundScoring(state) {
     return total;
   });
   state.players.forEach((p, i) => { p.score += state.perRoundScores[i]; });
+  if (!Array.isArray(state.roundHistory)) state.roundHistory = [];
+  state.roundHistory.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx: state.roundWinner,
+    scores: state.perRoundScores.slice(),
+    cumulative: state.players.map(p => p.score),
+  });
 }
 
 export function isMatchOver(state) {
