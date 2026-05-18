@@ -1095,7 +1095,11 @@ body.hand-dragging textarea {
 .tutorial-coach-bottom {
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--card-h) + 96px);
+  /* Anchor near the top of the viewport (below the play-screen top bar)
+     rather than above the hand. The previous bottom-anchored position used
+     to overlap the hand-bar buttons (Play set, Add to set, …) when those
+     wrap onto a second row on phones. */
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
   z-index: 45;
   width: calc(100% - 32px);
   max-width: 380px;
