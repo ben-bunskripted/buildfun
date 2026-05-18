@@ -997,6 +997,7 @@ body.hand-dragging textarea {
 }
 .tutorial-row .text-link { display: inline-block; margin-top: 6px; }
 .tutorial-hide { font-size: 12px; opacity: 0.7; }
+.tutorial-foot { font-size: 12px; opacity: 0.7; margin-top: 18px; }
 
 .feedback-textarea {
   width: 100%; min-height: 110px; resize: vertical; font-family: inherit;

@@ -177,6 +177,7 @@ function buildStart() {
 
   $("start-btn").addEventListener("click", onStartMatch);
   $("tutorial-btn").addEventListener("click", onStartTutorial);
+  $("tutorial-foot-btn").addEventListener("click", onStartTutorial);
   $("tutorial-hide-btn").addEventListener("click", () => {
     savePrefs({ ...loadPrefs(), hideTutorial: true });
     applyTutorialVisibility();
