@@ -639,6 +639,7 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
+  -webkit-touch-callout: none;
 }
 .card-art {
   position: absolute;
@@ -751,6 +752,24 @@ body {
   opacity: 0.95;
 }
 .card.drag-placeholder { opacity: 0; }
+
+/* While a hand drag is in progress, suppress the browser's native selection
+   and long-press callout on the whole document — once the dragged card moves
+   away from under the finger on Android Chrome, the OS otherwise starts a
+   text-selection gesture on whatever is underneath, which cancels our drag
+   and snaps the card back to its origin. Inputs in modals still need to be
+   editable, so let them opt back in. */
+body.hand-dragging,
+body.hand-dragging * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+body.hand-dragging input,
+body.hand-dragging textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
 
 /* Card back */
 .card.back, .pile-card.back {
