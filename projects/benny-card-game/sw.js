@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "benny-v17";
+const CACHE = "benny-v18";
 
 const CARD_NAMES = [
   "1B","1J","2B","2J","2C","2D","2H","2S","3C","3D","3H","3S",
@@ -41,8 +41,14 @@ self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     await cache.addAll(SHELL);
-    self.skipWaiting();
+    // Don't auto-skipWaiting — let the page detect the waiting worker and
+    // prompt the user to refresh. We honor a SKIP_WAITING message from the
+    // page when they click "Refresh" on the update banner.
   })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
