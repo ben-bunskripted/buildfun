@@ -51,25 +51,35 @@ export function makeHandReorderable(handEl, onReorder) {
     const startDrag = (ev) => {
       ctx.armed = true;
       ctx.dragging = true;
-      ctx.rect = card.getBoundingClientRect();
-      ctx.offsetX = startX - ctx.rect.left;
-      ctx.offsetY = startY - ctx.rect.top;
+      // getBoundingClientRect returns the screen-aligned bbox, which for a
+      // fan-rotated card is *wider* than the card itself and offset from its
+      // top-left. To keep the dragged card's intrinsic size (and to not warp
+      // the placeholder), derive an unrotated rect by re-centering the bbox
+      // on the card's offsetWidth/offsetHeight.
+      const bbox = card.getBoundingClientRect();
+      const w = card.offsetWidth;
+      const h = card.offsetHeight;
+      const left = bbox.left + bbox.width / 2 - w / 2;
+      const top = bbox.top + bbox.height / 2 - h / 2;
+      ctx.rect = { left, top, width: w, height: h };
+      ctx.offsetX = startX - left;
+      ctx.offsetY = startY - top;
       try { card.setPointerCapture(ctx.pointerId); } catch (_) {}
 
       // Build placeholder occupying the original slot.
       const ph = document.createElement("div");
       ph.className = "drag-placeholder card";
-      ph.style.width = ctx.rect.width + "px";
-      ph.style.height = ctx.rect.height + "px";
+      ph.style.width = w + "px";
+      ph.style.height = h + "px";
       handEl.insertBefore(ph, card.nextSibling);
       ctx.placeholder = ph;
 
       // Lift the card out of flow.
       card.style.position = "fixed";
       card.style.zIndex = "200";
-      card.style.left = ctx.rect.left + "px";
-      card.style.top = ctx.rect.top + "px";
-      card.style.width = ctx.rect.width + "px";
+      card.style.left = left + "px";
+      card.style.top = top + "px";
+      card.style.width = w + "px";
       card.classList.add("dragging");
       ctx.moveSuppressedClick = true;
     };

@@ -180,6 +180,72 @@ body {
 .resume-actions .pill { padding: 6px 12px; font-size: 13px; color: var(--ink); background: #fff; border-color: rgba(0,0,0,0.1); }
 .resume-actions .pill.primary { color: #fff; background: linear-gradient(180deg, #4a90e2, #1f5fa0); border-color: rgba(255,255,255,0.30); }
 
+/* "Stats & achievements" entry — gold treatment to feel like a reward. */
+.trophy-btn {
+  appearance: none;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fff5d6, #fde9b0);
+  color: #5a3d10;
+  border: 1px solid rgba(201,150,58,0.55);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(245,196,81,0.25) inset,
+    0 4px 12px rgba(201,150,58,0.18);
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.08s ease, box-shadow 0.15s ease;
+}
+.trophy-btn:hover {
+  box-shadow:
+    0 0 0 1px rgba(245,196,81,0.4) inset,
+    0 6px 18px rgba(201,150,58,0.28);
+}
+.trophy-btn:active { transform: translateY(1px); }
+.trophy-btn-icon {
+  font-size: 22px; line-height: 1;
+  flex: 0 0 auto;
+  animation: trophy-pulse 2.4s ease-in-out infinite;
+  transform-origin: 50% 60%;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.18));
+}
+.trophy-btn-text { flex: 1; }
+.trophy-btn-chev {
+  font-size: 22px; line-height: 1;
+  color: var(--gold-deep);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+@keyframes trophy-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.12); }
+}
+/* Subtle sheen sweep so the button has presence without being noisy. */
+.trophy-btn::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: -40%;
+  width: 30%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: skewX(-18deg);
+  animation: trophy-sheen 5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes trophy-sheen {
+  0%, 70%, 100% { left: -40%; }
+  85%           { left: 110%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trophy-btn-icon { animation: none; }
+  .trophy-btn::after { display: none; }
+}
+
 .opp-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .opp-list-header {
   display: grid; grid-template-columns: 1fr 130px; gap: 8px;
@@ -341,6 +407,60 @@ body {
   flex: 0 0 auto;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25));
 }
+
+/* ---------- Top-bar hamburger (mobile) ---------- */
+/* The narrow-screen menu container is hidden on wider screens and only the
+   inline wide buttons (?, feedback, save & exit) show. Flipped on mobile via
+   the media query at the bottom of this file. */
+.top-bar-menu { position: relative; margin-left: auto; display: none; flex: 0 0 auto; }
+.top-bar-burger {
+  padding: 6px 10px; font-size: 14px; line-height: 1; min-width: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.burger-icon, .burger-icon::before, .burger-icon::after {
+  display: block;
+  width: 18px; height: 2px;
+  background: #fff;
+  border-radius: 2px;
+  content: "";
+}
+.burger-icon { position: relative; }
+.burger-icon::before { position: absolute; left: 0; top: -6px; }
+.burger-icon::after { position: absolute; left: 0; top: 6px; }
+.top-bar-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: rgba(13, 30, 61, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 60;
+  display: flex; flex-direction: column;
+}
+.top-bar-menu-list .menu-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #fff;
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.top-bar-menu-list .menu-item:hover,
+.top-bar-menu-list .menu-item:focus-visible {
+  background: rgba(255,255,255,0.10);
+  outline: none;
+}
+.top-bar-menu-list .menu-item:active { background: rgba(255,255,255,0.16); }
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--panel-soft);
@@ -488,12 +608,20 @@ body {
 
 .hand {
   display: flex;
+  justify-content: center;
   padding: 8px 6px 4px;
   min-height: calc(var(--card-h) + 16px);
 }
 .hand > .card + .card { margin-left: var(--hand-overlap, 6px); }
 .hand > .card.selected,
 .hand > .card.just-drawn { z-index: 10; }
+
+/* Fanned hand — heavy overlap and per-card rotation around a pivot below the
+   row, so the cards look held in a real hand. layoutHand() in main.js sets
+   each card's --card-rot. The container gets extra top padding so the rotated
+   top edges have room to swing up without clipping. */
+.hand.fanned { padding-top: 22px; min-height: calc(var(--card-h) + 38px); }
+.hand.fanned > .card { transform-origin: 50% 220%; }
 
 .hand-hint { font-size: 12px; color: var(--muted); padding: 6px 6px 0; }
 
@@ -590,11 +718,18 @@ body {
 
 .card.in-hand {
   cursor: pointer;
+  /* Rotation set per-card by layoutHand() when fanned; lift set by .selected.
+     Order matters: rotate first, then translate along the card's own Y axis so
+     a selected card pops "out" of the fan rather than away from screen-up. */
+  transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-y, 0));
   transition: transform 0.12s ease, box-shadow 0.12s ease, outline-color 0.12s ease;
-  touch-action: pan-x;
+  /* Hand no longer scrolls horizontally (cards fan with overlap). Claim all
+     touch gestures on a card so the long-press → drag reorder isn't pre-empted
+     by Chrome Android's pan-x scroll heuristic. */
+  touch-action: none;
 }
 .card.in-hand.selected {
-  transform: translateY(-12px);
+  --card-y: -14px;
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   box-shadow: var(--shadow-md);
@@ -607,7 +742,12 @@ body {
 .card.dragging {
   z-index: 30;
   box-shadow: var(--shadow-lg);
+  /* Reset the fan rotation/pivot while the card follows the pointer — it lives
+     at position:fixed during the drag and shouldn't fan around the hand's
+     pivot point. */
+  transform-origin: 50% 50%;
   transform: translateY(-10px) scale(1.04);
+  --card-rot: 0deg;
   opacity: 0.95;
 }
 .card.drag-placeholder { opacity: 0; }
@@ -690,7 +830,102 @@ body {
 .match-end-panel .trophy { font-size: 28px; margin: 0 0 6px; }
 .match-end-history { margin: 4px 0 18px; }
 .match-end-history:empty { display: none; }
+.match-end-rewards { margin: 4px 0 18px; text-align: left; }
+.match-end-rewards:empty { display: none; }
+.rewards-block { margin-top: 10px; }
+.rewards-name {
+  font-size: 13px; font-weight: 700; color: var(--ink-soft);
+  margin: 6px 0 6px;
+}
+.rewards-grid { display: flex; flex-direction: column; gap: 6px; }
 #new-match-btn, #continue-btn { width: 100%; }
+
+/* ---------- Achievement cards ---------- */
+.achievement-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #f4f7f5;
+  border: 1px solid rgba(0,0,0,0.06);
+  text-align: left;
+}
+.achievement-card.is-unlocked {
+  background: linear-gradient(180deg, #fff5d6, #fde9b0);
+  border-color: rgba(201,150,58,0.55);
+  box-shadow: 0 0 0 1px rgba(245,196,81,0.25) inset;
+}
+.achievement-card.is-locked { opacity: 0.5; filter: grayscale(0.6); }
+.achievement-icon {
+  font-size: 22px; line-height: 1;
+  width: 32px; text-align: center;
+  flex: 0 0 auto;
+}
+.achievement-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.achievement-name { font-size: 14px; font-weight: 700; color: var(--ink); }
+.achievement-desc { font-size: 12px; color: var(--ink-soft); }
+
+/* ---------- Profile screen ---------- */
+.profile-wrap { padding: 16px; display: flex; justify-content: center; }
+.profile-panel { max-width: 560px; width: 100%; text-align: left; }
+.profile-panel .muted { color: var(--ink-soft); }
+.profile-empty { padding: 12px 0; }
+.profile-body { display: flex; flex-direction: column; gap: 18px; }
+.profile-section { display: flex; flex-direction: column; gap: 8px; }
+.profile-section-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-soft); margin: 0;
+}
+.stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+}
+@media (min-width: 540px) {
+  .stats-grid { grid-template-columns: repeat(4, 1fr); }
+}
+.stat-tile {
+  background: #f4f7f5; border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 12px; padding: 10px 8px;
+  text-align: center;
+}
+.stat-value {
+  font-size: 22px; font-weight: 800; color: var(--ink);
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.stat-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-soft); margin-top: 2px;
+}
+
+.sparkline {
+  background: #f4f7f5; border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 12px; padding: 10px;
+}
+.sparkline-svg { width: 100%; height: 80px; display: block; }
+.sparkline-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 6px; font-size: 12px; color: var(--ink-soft);
+}
+.sparkline-meta strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.profile-history-table {
+  width: 100%; border-collapse: collapse; color: var(--ink); font-size: 14px;
+}
+.profile-history-table th, .profile-history-table td {
+  padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,0.06);
+  text-align: left;
+}
+.profile-history-table th {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-soft); font-weight: 600;
+}
+.profile-history-table td { font-variant-numeric: tabular-nums; }
+.profile-history-table tr.winner-row td:first-child::before { content: "🏆 "; }
+
+.achievements-grid {
+  display: grid; grid-template-columns: 1fr; gap: 6px;
+}
+@media (min-width: 540px) {
+  .achievements-grid { grid-template-columns: 1fr 1fr; }
+}
 
 /* Confetti */
 .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
@@ -819,6 +1054,12 @@ body {
 }
 
 /* ---------- Responsiveness helpers ---------- */
+@media (max-width: 600px) {
+  /* Collapse the top-bar's ?/feedback/save-&-exit trio into a hamburger menu
+     so the badges aren't pushed onto a second row on phones. */
+  .top-bar-wide { display: none !important; }
+  .top-bar-menu { display: inline-flex; }
+}
 @media (max-width: 380px) {
   :root { --card-w: 52px; --card-h: 80px; }
   .top-bar { padding: 8px; }

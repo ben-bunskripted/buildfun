@@ -46,6 +46,11 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     roundWinner: null,
     perRoundScores: [],
     roundHistory: [],
+    // Lightweight event log read by the achievement evaluator at match end.
+    // `opens`: first set each player places in a round (used by Sniper).
+    // `discards`: every discard, with wasWild flag (used by Whoopsie).
+    // `rounds`: per-round meta (winner, dealer, # wildcards in winning play).
+    matchEvents: { opens: [], discards: [], rounds: [] },
   };
 }
 
@@ -165,8 +170,15 @@ export function placeNewSet(state, arrangement) {
     set.baseValue = arrangement.baseValue;
   }
   state.table.push(set);
+  const wasFirstOpen = !player.hasOpened;
   player.hasOpened = true;
+  if (wasFirstOpen) recordOpen(state, state.currentPlayerIndex);
   return { ok: true, set };
+}
+
+function recordOpen(state, playerIdx) {
+  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  state.matchEvents.opens.push({ round: state.round, playerIdx });
 }
 
 export function addToSet(state, setId, arrangement) {
@@ -256,6 +268,15 @@ export function discard(state, cardId) {
   state.discardPile.push(card);
   state.lastDrawnCardId = null;
 
+  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  state.matchEvents.discards.push({
+    round: state.round,
+    playerIdx: state.currentPlayerIndex,
+    rank: card.rank,
+    suit: card.suit,
+    wasWild: card.rank === state.wildcardRank,
+  });
+
   // CPUs with memory observe every card that lands face-up.
   for (const p of state.players) {
     if (p.kind === "cpu" && Array.isArray(p.memory) && !p.memory.includes(card.id)) {
@@ -307,6 +328,25 @@ function finalizeRoundScoring(state) {
     winnerIdx: state.roundWinner,
     scores: state.perRoundScores.slice(),
     cumulative: state.players.map(p => p.score),
+  });
+
+  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  // How many wildcards did the winner have on the table this round? Used by Big Wild.
+  let winnerWildsOnTable = 0;
+  if (state.roundWinner != null) {
+    for (const s of state.table) {
+      if (s.ownerIndex !== state.roundWinner) continue;
+      for (const c of s.cards) if (c.isWild) winnerWildsOnTable += 1;
+    }
+  }
+  const opensThisRound = state.matchEvents.opens.filter(o => o.round === state.round);
+  state.matchEvents.rounds.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx: state.roundWinner,
+    dealerIdx: state.dealerIndex,
+    openedOrder: opensThisRound.map(o => o.playerIdx),
+    winnerWildsOnTable,
   });
 }
 

@@ -16,6 +16,8 @@ import {
   isScoringMatchOver, advanceScoringRound, scoringWinnerIndex,
 } from "./scoring.js";
 import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot } from "./storage.js";
+import { loadProfiles, saveProfiles, buildMatchSummary, recordMatch, listKnownPlayers, achievementById, keyFor as profileKeyFor } from "./profiles.js";
+import { ACHIEVEMENTS, ALL_MODES, MODE_LABELS } from "./achievements.js";
 
 // ---------- App state ----------
 let state = null;        // active match state (multiplayer/cpu) OR scoring state
@@ -46,6 +48,9 @@ let ui = {
   pendingAfterCpu: null,
   // Visual preference: "modern" (SVG assets) | "classic" (DOM-built)
   cardStyle: "modern",
+  // Hand layout: true = cards fan with heavy overlap + per-card tilt; false =
+  // spread out with minimal overlap. Default fanned.
+  handFanned: true,
 };
 
 // Apply persisted card style preference before any cards are rendered.
@@ -53,6 +58,9 @@ let ui = {
   const prefs = loadPrefs();
   if (prefs.cardStyle === "classic" || prefs.cardStyle === "modern") {
     ui.cardStyle = prefs.cardStyle;
+  }
+  if (typeof prefs.handFanned === "boolean") {
+    ui.handFanned = prefs.handFanned;
   }
   setCardStyle(ui.cardStyle);
 }
@@ -79,7 +87,11 @@ function toast(msg, ms = 1800) {
 }
 
 // ---------- Start screen ----------
-const DEFAULT_NAMES = ["Ben", ...shuffleInPlace(["Roxy","Kye","Tim","Wayne","Nath","Sean","Fiona","Jon","Zach"]).slice(0, 3)];
+// First slot is the device owner; their name is captured by the welcome modal
+// on first launch and persisted in prefs. "Ben" is only the seed used before
+// the user types theirs in.
+const DEFAULT_NAMES = [(loadPrefs().userName || "").trim() || "Ben",
+  ...shuffleInPlace(["Roxy","Kye","Tim","Wayne","Nath","Sean","Fiona","Jon","Zach"]).slice(0, 3)];
 // Use the same shuffled picks for CPU opponent defaults so the suggested names line up across modes.
 ui.solo.opponents.forEach((o, i) => { o.name = DEFAULT_NAMES[i + 1] || `CPU ${i + 1}`; });
 function defaultName(i) { return DEFAULT_NAMES[i] || `Player ${i+1}`; }
@@ -163,6 +175,7 @@ function buildStart() {
   // Rules modal — opened from start screen, also from play / scoring top bars (wired in wireUp).
   const rulesModal = $("modal-rules");
   $("rules-btn").addEventListener("click", openRules);
+  $("profile-btn").addEventListener("click", openProfileScreen);
   $("modal-rules-close").addEventListener("click", closeRules);
   rulesModal.addEventListener("click", (e) => {
     if (e.target === rulesModal) closeRules();
@@ -702,19 +715,47 @@ function renderHand() {
   layoutHand();
 }
 
-// Fan the hand: pick a per-card horizontal step so every card fits in the
-// container, overlapping toward the right when necessary. The top-left corner
-// stays visible on every card (later DOM siblings paint above earlier ones).
+// Lay out the hand in one of two modes:
+//   fanned:   heavy fixed overlap (~55% of card_w hidden) + per-card rotation
+//             pivoting below the row, so the cards look held in a real hand.
+//   spread:   minimal gap; overlap only as much as needed to fit the width.
+// Per-card rotation is written into `--card-rot`; container overlap into
+// `--hand-overlap`. Cards are centered horizontally via `justify-content` in
+// CSS, so we don't need to compute padding/margins to balance them.
 function layoutHand() {
   const hand = $("hand");
   if (!hand) return;
   const cards = hand.querySelectorAll(".card");
   const n = cards.length;
+  hand.classList.toggle("fanned", !!ui.handFanned);
+  // Clear stale rotations whenever we re-layout — we may have just toggled
+  // fan off, or the card count may have shrunk.
+  cards.forEach(c => c.style.removeProperty("--card-rot"));
+
   if (n === 0) {
     hand.style.setProperty("--hand-overlap", "6px");
     return;
   }
+
   const cardW = parseFloat(getComputedStyle(cards[0]).width) || 58;
+
+  if (ui.handFanned) {
+    // Heavy overlap so cards stack like in a real hand. Show ~45% of each
+    // card's left edge.
+    const overlap = -Math.round(cardW * 0.55);
+    hand.style.setProperty("--hand-overlap", `${overlap}px`);
+    // Per-card tilt. Cap the total spread so 8 cards don't look like an
+    // explosion.
+    const stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
+    const startDeg = -stepDeg * (n - 1) / 2;
+    cards.forEach((c, i) => {
+      const rot = startDeg + stepDeg * i;
+      c.style.setProperty("--card-rot", `${rot.toFixed(2)}deg`);
+    });
+    return;
+  }
+
+  // Spread mode — pack to width only if natural layout doesn't fit.
   const cs = getComputedStyle(hand);
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
   const available = hand.clientWidth - padX;
@@ -727,6 +768,13 @@ function layoutHand() {
   // cardW + (n - 1) * step = available  →  step = (available - cardW) / (n - 1)
   const step = (available - cardW) / (n - 1);
   hand.style.setProperty("--hand-overlap", `${step - cardW}px`);
+}
+
+function syncFanToggleLabel() {
+  const btn = $("fan-toggle-btn");
+  if (!btn) return;
+  btn.textContent = ui.handFanned ? "Fan: On" : "Fan: Off";
+  btn.setAttribute("aria-pressed", String(!!ui.handFanned));
 }
 
 function handHint() {
@@ -764,6 +812,47 @@ function exitToStart() {
   showScreen("screen-start");
 }
 
+// Mobile top-bar hamburger. The trigger button and dropdown live inside the
+// top-bar; on screens >600px the trigger is hidden by CSS and the inline
+// ?/feedback/exit pills are shown instead.
+const MENU_ACTIONS = { rules: openRules, feedback: openFeedback, exit: exitToStart };
+function closeAllTopBarMenus() {
+  document.querySelectorAll(".top-bar-menu-list").forEach(list => {
+    list.classList.add("hidden");
+    const id = list.id;
+    const trigger = document.querySelector(`[aria-controls="${id}"]`);
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  });
+}
+function wireTopBarMenu(btnId, listId) {
+  const btn = $(btnId);
+  const list = $(listId);
+  if (!btn || !list) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wasOpen = !list.classList.contains("hidden");
+    closeAllTopBarMenus();
+    if (!wasOpen) {
+      list.classList.remove("hidden");
+      btn.setAttribute("aria-expanded", "true");
+    }
+  });
+  list.addEventListener("click", (e) => {
+    const item = e.target.closest(".menu-item");
+    if (!item) return;
+    const action = MENU_ACTIONS[item.dataset.action];
+    closeAllTopBarMenus();
+    if (action) action();
+  });
+}
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".top-bar-menu")) return;
+  closeAllTopBarMenus();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeAllTopBarMenus();
+});
+
 function wireUp() {
   $("play-exit-btn").addEventListener("click", exitToStart);
   $("scoring-exit-btn").addEventListener("click", exitToStart);
@@ -771,6 +860,8 @@ function wireUp() {
   $("scoring-rules-btn").addEventListener("click", openRules);
   $("play-feedback-btn").addEventListener("click", openFeedback);
   $("scoring-feedback-btn").addEventListener("click", openFeedback);
+  wireTopBarMenu("play-menu-btn", "play-menu-list");
+  wireTopBarMenu("scoring-menu-btn", "scoring-menu-list");
   wireInstallLink();
 
   // Card selection (delegated)
@@ -823,6 +914,18 @@ function wireUp() {
     me.hand = [...me.hand].sort((a, b) => compareForSort(a, b, state.wildcardRank));
     renderHand();
   });
+
+  // Fan toggle — heavy overlap + per-card tilt vs spread layout.
+  const fanBtn = $("fan-toggle-btn");
+  if (fanBtn) {
+    syncFanToggleLabel();
+    fanBtn.addEventListener("click", () => {
+      ui.handFanned = !ui.handFanned;
+      savePrefs({ ...loadPrefs(), handFanned: ui.handFanned });
+      syncFanToggleLabel();
+      layoutHand();
+    });
+  }
 
   // Play set
   $("play-set-btn").addEventListener("click", () => {
@@ -886,6 +989,28 @@ function wireUp() {
   $("resume-discard").addEventListener("click", () => {
     discardSave();
     renderResumeBanner();
+  });
+
+  // Profile screen
+  $("profile-back-btn").addEventListener("click", () => {
+    renderResumeBanner();
+    showScreen("screen-start");
+  });
+  $("profile-picker").addEventListener("change", () => {
+    // Re-default mode to the freshly-picked player's most-recent mode.
+    const profiles = loadProfiles();
+    const p = profiles.players[$("profile-picker").value];
+    const firstHist = p && p.matchHistory && p.matchHistory[0];
+    profileSelectedMode = firstHist && ALL_MODES.includes(firstHist.mode) ? firstHist.mode : "multiplayer";
+    paintProfileModeSeg();
+    renderProfileBody($("profile-picker").value, profileSelectedMode);
+  });
+  $("profile-mode-seg").addEventListener("click", (e) => {
+    const btn = e.target.closest(".seg-btn");
+    if (!btn) return;
+    profileSelectedMode = btn.dataset.mode;
+    paintProfileModeSeg();
+    renderProfileBody($("profile-picker").value, profileSelectedMode);
   });
 }
 
@@ -1209,8 +1334,63 @@ function goMatchEnd() {
     tbody.appendChild(tr);
   }
   renderMatchEndHistory();
+  recordAndRenderRewards();
   buildConfetti();
   discardSave();
+}
+
+// Fold the just-finished match into the player profiles store and render the
+// per-player "Rewards earned" section on the match-end screen. Persists nothing
+// if the storage layer is unavailable (profiles.js is graceful).
+function recordAndRenderRewards() {
+  const host = $("match-end-rewards");
+  if (!host) return;
+  host.innerHTML = "";
+  if (!state) return;
+  const profiles = loadProfiles();
+  const summary = buildMatchSummary(state);
+  const { newUnlocks } = recordMatch(profiles, summary);
+  saveProfiles(profiles);
+
+  const playerIdxs = Object.keys(newUnlocks).map(Number);
+  if (!playerIdxs.length) return;
+
+  const title = document.createElement("h3");
+  title.className = "sc-history-title";
+  title.textContent = "Rewards earned";
+  host.appendChild(title);
+
+  for (const idx of playerIdxs) {
+    const p = state.players[idx];
+    const block = document.createElement("div");
+    block.className = "rewards-block";
+    const head = document.createElement("div");
+    head.className = "rewards-name";
+    head.textContent = p.name;
+    block.appendChild(head);
+    const grid = document.createElement("div");
+    grid.className = "rewards-grid";
+    for (const id of newUnlocks[idx]) {
+      const a = achievementById(id);
+      if (!a) continue;
+      grid.appendChild(renderAchievementCard(a, true));
+    }
+    block.appendChild(grid);
+    host.appendChild(block);
+  }
+}
+
+function renderAchievementCard(a, unlocked) {
+  const el = document.createElement("div");
+  el.className = `achievement-card ${unlocked ? "is-unlocked" : "is-locked"}`;
+  el.innerHTML = `
+    <div class="achievement-icon" aria-hidden="true">${a.icon || "🏅"}</div>
+    <div class="achievement-info">
+      <div class="achievement-name">${escapeHTML(a.name)}</div>
+      <div class="achievement-desc">${escapeHTML(a.description)}</div>
+    </div>
+  `;
+  return el;
 }
 
 function renderMatchEndHistory() {
@@ -1227,6 +1407,180 @@ function renderMatchEndHistory() {
   }).join("");
   host.innerHTML = `<h3 class="sc-history-title">Round-by-round</h3>
     <table class="sc-history-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// ---------- Stats & achievements screen ----------
+let profileSelectedMode = "multiplayer";
+
+function openProfileScreen() {
+  const profiles = loadProfiles();
+  const picker = $("profile-picker");
+  const known = listKnownPlayers(profiles);
+  picker.innerHTML = "";
+  for (const p of known) {
+    const opt = document.createElement("option");
+    opt.value = profileKeyFor(p.canonical);
+    opt.textContent = p.canonical;
+    picker.appendChild(opt);
+  }
+  showScreen("screen-profile");
+  if (!known.length) {
+    $("profile-empty").classList.remove("hidden");
+    $("profile-body").classList.add("hidden");
+    $("profile-mode-empty").classList.add("hidden");
+    return;
+  }
+  $("profile-empty").classList.add("hidden");
+  // Default mode = the most-recent mode this player has actually played.
+  const p = profiles.players[picker.value];
+  const firstHist = p && p.matchHistory && p.matchHistory[0];
+  profileSelectedMode = firstHist && ALL_MODES.includes(firstHist.mode) ? firstHist.mode : "multiplayer";
+  paintProfileModeSeg();
+  renderProfileBody(picker.value, profileSelectedMode);
+}
+
+function paintProfileModeSeg() {
+  const seg = $("profile-mode-seg");
+  seg.querySelectorAll(".seg-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === profileSelectedMode);
+  });
+}
+
+function renderProfileBody(playerKey, mode) {
+  const profiles = loadProfiles();
+  const p = profiles.players[playerKey];
+  if (!p) return;
+
+  const matches = p.matchHistory.filter(m => m.mode === mode);
+  const body = $("profile-body");
+  const empty = $("profile-mode-empty");
+  if (!matches.length) {
+    body.classList.add("hidden");
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  body.classList.remove("hidden");
+
+  renderProfileStats(matches);
+  renderProfileSparkline(matches);
+  renderProfileRecent(matches);
+  renderProfileAchievements(p, mode);
+}
+
+// All stats derived from matchHistory filtered to the selected mode.
+function renderProfileStats(matches) {
+  const host = $("profile-stats");
+  host.innerHTML = "";
+  const matchesPlayed = matches.length;
+  const wins = matches.filter(m => m.position === 1).length;
+  const scores = matches.map(m => m.finalScore);
+  const total = scores.reduce((a, b) => a + b, 0);
+  const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+  const avg = matchesPlayed > 0 ? Math.round(total / matchesPlayed) : 0;
+  const best = scores.length ? Math.min(...scores) : "—";
+  const worst = scores.length ? Math.max(...scores) : "—";
+  const roundsWon = matches.reduce((a, m) => a + (m.roundsWon || 0), 0);
+  const tiles = [
+    ["Matches", matchesPlayed],
+    ["Wins", wins],
+    ["Win rate", `${winRate}%`],
+    ["Best", best],
+    ["Worst", worst],
+    ["Avg score", avg],
+    ["Rounds won", roundsWon],
+  ];
+  for (const [label, value] of tiles) {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    tile.innerHTML = `<div class="stat-value">${escapeHTML(String(value))}</div><div class="stat-label">${escapeHTML(label)}</div>`;
+    host.appendChild(tile);
+  }
+}
+
+function renderProfileSparkline(matches) {
+  const host = $("profile-sparkline");
+  const section = $("profile-spark-section");
+  // Last 20 matches in chronological order (matchHistory is newest-first).
+  const series = matches.slice(0, 20).reverse().map(m => m.finalScore);
+  if (series.length < 2) {
+    host.innerHTML = `<p class="muted small-help">Play a few matches to see your trend.</p>`;
+    section.classList.remove("hidden");
+    return;
+  }
+  const W = 320, H = 80, PAD = 6;
+  const min = Math.min(...series), max = Math.max(...series);
+  const range = Math.max(1, max - min);
+  const stepX = (W - PAD * 2) / (series.length - 1);
+  const pts = series.map((v, i) => {
+    const x = PAD + i * stepX;
+    const y = PAD + (H - PAD * 2) * (1 - (v - min) / range);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  // Trend colour: compare first vs last (lower is better in Benny).
+  const trend = series[series.length - 1] - series[0];
+  const stroke = trend < -5 ? "#4caf6e" : trend > 5 ? "#d96a5b" : "#4a90e2";
+  host.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="sparkline-svg" aria-label="Score over last ${series.length} matches">
+      <polyline fill="none" stroke="${stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts.join(" ")}" />
+    </svg>
+    <div class="sparkline-meta">
+      <span>Latest: <strong>${series[series.length - 1]}</strong></span>
+      <span>Best: <strong>${min}</strong></span>
+    </div>
+  `;
+  section.classList.remove("hidden");
+}
+
+function renderProfileRecent(matches) {
+  const tbody = $("profile-recent");
+  tbody.innerHTML = "";
+  const rows = matches.slice(0, 10);
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">No matches yet.</td></tr>`;
+    return;
+  }
+  for (const m of rows) {
+    const tr = document.createElement("tr");
+    const date = new Date(m.date);
+    const dateStr = isNaN(date) ? "—" : date.toLocaleDateString();
+    const modeLabel = MODE_LABELS[m.mode] || m.mode;
+    const place = `${ordinal(m.position)} / ${m.totalPlayers}`;
+    if (m.position === 1) tr.className = "winner-row";
+    tr.innerHTML = `<td>${escapeHTML(dateStr)}</td><td>${escapeHTML(modeLabel)}</td><td>${m.finalScore}</td><td>${escapeHTML(place)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function renderProfileAchievements(profile, mode) {
+  const host = $("profile-achievements");
+  host.innerHTML = "";
+  // Achievements unlocked IN THIS MODE only — separate from other modes.
+  const unlockedIds = new Set(profile.achievements
+    .filter(a => a.matchContext && a.matchContext.mode === mode)
+    .map(a => a.id));
+  // Only include achievements eligible in the selected mode.
+  const eligible = ACHIEVEMENTS.filter(a => !a.modes || a.modes.includes(mode));
+  // Unlocked first, then locked. Stable within group.
+  const sorted = eligible.slice().sort((a, b) => {
+    const au = unlockedIds.has(a.id) ? 0 : 1;
+    const bu = unlockedIds.has(b.id) ? 0 : 1;
+    return au - bu;
+  });
+  for (const a of sorted) {
+    host.appendChild(renderAchievementCard(a, unlockedIds.has(a.id)));
+  }
 }
 
 // ---------- Resume from saved match ----------
@@ -1346,6 +1700,39 @@ function setupCardZoom() {
   document.addEventListener("touchcancel", endTouch);
 }
 
+// ---------- Welcome modal (first-launch name capture) ----------
+function showWelcomeModalIfNeeded() {
+  const prefs = loadPrefs();
+  if (prefs.userName && prefs.userName.trim()) return;
+  const modal = $("modal-welcome");
+  const form = $("welcome-form");
+  const input = $("welcome-name");
+  modal.classList.remove("hidden");
+  // Focus the input — autofocus attribute is unreliable when the element starts hidden.
+  setTimeout(() => input.focus(), 0);
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const name = (input.value || "").trim();
+    if (!name) { input.focus(); return; }
+    savePrefs({ ...loadPrefs(), userName: name });
+    applyUserName(name);
+    modal.classList.add("hidden");
+  };
+}
+
+// Update DEFAULT_NAMES[0] + any already-rendered inputs to use the new owner name.
+function applyUserName(name) {
+  DEFAULT_NAMES[0] = name;
+  ui.solo.humanName = name;
+  ui.playerNames[0] = name;
+  // Re-paint name inputs that were built before onboarding completed.
+  const soloInput = $("solo-name");
+  if (soloInput) soloInput.value = name;
+  if (typeof renderNameFields === "function") renderNameFields();
+  if (typeof renderDealerSelect === "function") renderDealerSelect();
+  if (typeof renderSoloDealer === "function") renderSoloDealer();
+}
+
 // ---------- Boot ----------
 function boot() {
   buildStart();
@@ -1354,5 +1741,6 @@ function boot() {
   setupCardZoom();
   window.addEventListener("resize", layoutHand);
   showScreen("screen-start");
+  showWelcomeModalIfNeeded();
 }
 document.addEventListener("DOMContentLoaded", boot);

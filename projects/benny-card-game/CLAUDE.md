@@ -25,7 +25,9 @@ benny-card-game/
 │   ├── ai.js               # CPU planTurn — enumerates plays, picks by difficulty
 │   ├── dragdrop.js         # pointer-event hand reorder (long-press on touch)
 │   ├── rng.js              # randomInt
-│   └── storage.js          # localStorage: match snapshot + user prefs (separate keys)
+│   ├── storage.js          # localStorage: match snapshot + user prefs (separate keys)
+│   ├── profiles.js         # persistent per-player profiles (lifetime stats + history)
+│   └── achievements.js     # registry + pure evaluators run at match end
 └── assets/
     ├── favicon.png         # gold "WILD" tile — favicon + apple-touch-icon + top-bar logo
     ├── logo-bg.png         # full Benny banner with cards + tagline — start-screen hero
@@ -67,12 +69,17 @@ Cards stay white; wild banner stays gold; danger stays red. No green anywhere.
 
 ## Persistence
 
-Two distinct keys in `storage.js`:
+Three distinct keys, each owned by a different module:
 
-- `benny:match:v1` — `{version, mode, state: serialize(state), ui: {mode}}`. Saved on every state-changing action (`persist()` is called throughout `main.js`).
-- `benny:prefs:v1` — `{cardStyle}` and any future user preferences. Outlives matches.
+- `benny:match:v1` (in `storage.js`) — `{version, mode, state: serialize(state), ui: {mode}}`. Saved on every state-changing action (`persist()` is called throughout `main.js`).
+- `benny:prefs:v1` (in `storage.js`) — `{cardStyle}` and any future user preferences. Outlives matches.
+- `benny:players:v1` (in `profiles.js`) — per-player lifetime profiles, keyed by `name.trim().toLowerCase()` so casing variants share a record. Holds `{stats, achievements[], matchHistory[]}`. Folded in at match-end via `recordMatch()`.
 
 `hasSnapshot()` + `load()` drive the resume banner on the start screen and the overwrite-confirmation modal.
+
+## Match-event log
+
+`game.js` state carries a `matchEvents: {opens, discards, rounds}` slice used only by the achievement evaluator at match-end. Populated by `placeNewSet` (first time a player opens in a round), `discard` (every discard, with `wasWild` flag), and `finalizeRoundScoring` (per-round meta: winner, dealer, `openedOrder`, `winnerWildsOnTable`). Scoring mode emits the same `rounds` shape with `openedOrder: null` so the evaluator can branch on "no card detail available".
 
 ## PWA / offline
 

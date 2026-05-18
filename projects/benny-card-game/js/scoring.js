@@ -15,6 +15,9 @@ export function createScoringMatch(playerNames, dealerIndex = 0) {
     perRoundScores: [],
     roundWinner: null,
     roundHistory: [],
+    // Parity with play-mode state so the achievement evaluator can read both.
+    // openedOrder is null here — scoring mode has no per-card detail.
+    matchEvents: { opens: [], discards: [], rounds: [] },
     phase: "matchStart",
   };
 }
@@ -56,6 +59,15 @@ export function submitScoringRound(state, winnerIdx, scores) {
     winnerIdx,
     scores: scores.slice(),
     cumulative: state.players.map(p => p.score),
+  });
+  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  state.matchEvents.rounds.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx,
+    dealerIdx: state.dealerIndex,
+    openedOrder: null,
+    winnerWildsOnTable: null,
   });
   state.phase = "roundOver";
   return { ok: true };
