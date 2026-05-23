@@ -5,6 +5,11 @@
   "description": "buildfun.co — static site + Netlify Functions for Benny online multiplayer",
   "type": "module",
   "dependencies": {
-    "@netlify/neon": "^0.1.2"
+    "@netlify/database": "^1.0.0",
+    "@netlify/neon": "^0.1.2",
+    "drizzle-orm": "^1.0.0-beta.22"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^1.0.0-beta.22"
   }
 }
