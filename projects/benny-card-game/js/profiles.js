@@ -5,7 +5,10 @@
 // Storage key `benny:players:v1` is intentionally separate from
 // `benny:match:v1` (in storage.js) — profiles outlive any single match.
 
-import { ACHIEVEMENTS, evaluateMatch } from "./achievements.js";
+import {
+  ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS, evaluateMatch,
+  summariseSetsPerPlayer, RUN_TARGET,
+} from "./achievements.js";
 
 const KEY = "benny:players:v1";
 const VERSION = 1;
@@ -58,6 +61,8 @@ export function ensureProfile(profiles, name) {
       },
       achievements: [],
       matchHistory: [],
+      // Per-mode lifetime progress: { [mode]: { [achievementId]: {value, items} } }
+      progress: {},
     };
     profiles.players[k] = p;
   } else {
@@ -108,16 +113,24 @@ export function buildMatchSummary(state) {
 }
 
 // Apply a match summary to the profiles store. Returns
-// { newUnlocks: { [playerIdx]: [achievementId, ...] } } so the match-end
-// screen can render the "Rewards earned" section.
+//   newUnlocks         — one-shot achievement IDs earned for the first time.
+//   progressUnlocks    — progress achievement IDs whose bar just hit target.
+//   progressGains      — every progress achievement that gained ground, with
+//                        before/after values and which items are new.
+// All three are keyed by playerIdx, so the match-end screen can render the
+// "Rewards earned" section + a section for progress nudges.
 export function recordMatch(profiles, summary) {
   const newUnlocks = {};
+  const progressUnlocks = {};
+  const progressGains = {};
   const earnedPerPlayer = evaluateMatch(summary, profiles);
+  const setsPerPlayer = summariseSetsPerPlayer(summary);
 
   for (const p of summary.players) {
     if (p.kind === "cpu") continue;       // CPUs don't get profiles or achievements
     const prof = ensureProfile(profiles, p.name);
     if (!prof) continue;
+    if (!prof.progress) prof.progress = {};   // backfill for older saved profiles
 
     prof.stats.matchesPlayed += 1;
     if (p.isWinner) prof.stats.matchesWon += 1;
@@ -164,11 +177,50 @@ export function recordMatch(profiles, summary) {
       fresh.push(id);
     }
     if (fresh.length) newUnlocks[p.idx] = fresh;
+
+    // Fold this player's match feats into the per-mode progress bucket. Skip
+    // scoring mode (no card-level events available).
+    const feats = setsPerPlayer[p.idx];
+    if (feats && PROGRESS_ACHIEVEMENTS.some(a => a.modes.includes(summary.mode))) {
+      const modeBucket = prof.progress[summary.mode] || (prof.progress[summary.mode] = {});
+      const gains = [];
+      const unlocked = [];
+      for (const def of PROGRESS_ACHIEVEMENTS) {
+        if (!def.modes.includes(summary.mode)) continue;
+        const row = modeBucket[def.id] || { value: 0, items: {} };
+        const before = row.value;
+        const beforeKeys = Object.keys(row.items || {});
+        const newItems = [];
+        if (def.id === "suit_sampler") {
+          for (const s of feats.runsBySuit) {
+            if (!row.items[s]) { row.items[s] = true; newItems.push(s); }
+          }
+          row.value = Object.keys(row.items).length;
+        } else if (def.id === "quad_collector") {
+          for (const r of feats.quadsByRank) {
+            if (!row.items[r]) { row.items[r] = true; newItems.push(r); }
+          }
+          row.value = Object.keys(row.items).length;
+        } else if (def.id === "long_run") {
+          if (feats.longestRun > row.value) row.value = Math.min(RUN_TARGET, feats.longestRun);
+        }
+        const after = row.value;
+        modeBucket[def.id] = row;
+        if (after > before || newItems.length) {
+          gains.push({ id: def.id, before, after, target: def.target, newItems });
+        }
+        if (before < def.target && after >= def.target) unlocked.push(def.id);
+      }
+      if (gains.length) progressGains[p.idx] = gains;
+      if (unlocked.length) progressUnlocks[p.idx] = unlocked;
+    }
   }
 
-  return { newUnlocks };
+  return { newUnlocks, progressUnlocks, progressGains };
 }
 
 export function achievementById(id) {
-  return ACHIEVEMENTS.find(a => a.id === id) || null;
+  return ACHIEVEMENTS.find(a => a.id === id)
+    || PROGRESS_ACHIEVEMENTS.find(a => a.id === id)
+    || null;
 }

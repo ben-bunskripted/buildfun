@@ -10,8 +10,31 @@
 const LONG_PRESS_MS = 220;
 const DRAG_THRESHOLD_PX = 6;
 
-export function makeHandReorderable(handEl, onReorder) {
+// makeHandReorderable wires the hand for both intra-hand reordering AND
+// drop-onto-external-targets (discard pile, melds, wildcards). The caller
+// supplies:
+//   onReorder(fromIndex, toIndex)
+//   resolveDropTarget(clientX, clientY, cardEl) → { el, kind, data } | null
+//   onDropOnTarget(target, cardEl)             — fired on release over target
+// resolveDropTarget is consulted on every pointermove so the renderer can
+// paint hover affordances on whichever target is currently under the pointer.
+export function makeHandReorderable(handEl, onReorder, opts = {}) {
+  const resolveDropTarget = opts.resolveDropTarget || (() => null);
+  const onDropOnTarget = opts.onDropOnTarget || (() => {});
   let active = null;
+  let currentTarget = null;
+  function clearTargetHover() {
+    if (currentTarget && currentTarget.el) currentTarget.el.classList.remove("is-drop-hover");
+    currentTarget = null;
+  }
+  function setTargetHover(target) {
+    if (currentTarget && currentTarget.el === (target && target.el)) return;
+    clearTargetHover();
+    if (target && target.el) {
+      target.el.classList.add("is-drop-hover");
+      currentTarget = target;
+    }
+  }
 
   function preventNative(e) { e.preventDefault(); }
 
@@ -135,6 +158,10 @@ export function makeHandReorderable(handEl, onReorder) {
       card.style.left = (ev.clientX - ctx.offsetX) + "px";
       card.style.top = (ev.clientY - ctx.offsetY) + "px";
       updatePlaceholderPosition(ev.clientX);
+      // Refresh drop-target hover so external targets (discard pile, melds)
+      // can light up while the card hovers over them.
+      const t = resolveDropTarget(ev.clientX, ev.clientY, card);
+      setTargetHover(t);
     }
 
     function updatePlaceholderPosition(clientX) {
@@ -191,6 +218,10 @@ export function makeHandReorderable(handEl, onReorder) {
         })();
         const toIndex = visualPlaceholderIdx;
 
+        // Was the pointer over an external drop target on release?
+        const finalTarget = currentTarget;
+        clearTargetHover();
+
         // Reset card styles and swap into placeholder position.
         card.style.position = "";
         card.style.left = "";
@@ -200,14 +231,20 @@ export function makeHandReorderable(handEl, onReorder) {
         card.classList.remove("dragging");
         ctx.placeholder.replaceWith(card);
 
-        // Always re-render the hand on drop, even when the card lands in its
-        // original slot. Otherwise the dragged DOM node keeps its identity
-        // and the prior `position:fixed` / .dragging cycle can leave it
-        // floating above its neighbors in the fan stack until the next
-        // render. A no-op splice on same-position keeps state consistent.
-        if (commit && fromIndex !== -1) {
+        if (commit && finalTarget) {
+          // External drop wins over an in-hand reorder.
+          onDropOnTarget(finalTarget, card);
+        } else if (commit && fromIndex !== -1) {
+          // Always re-render the hand on drop, even when the card lands in
+          // its original slot. Otherwise the dragged DOM node keeps its
+          // identity and the prior `position:fixed` / .dragging cycle can
+          // leave it floating above its neighbors in the fan stack until
+          // the next render. A no-op splice on same-position keeps state
+          // consistent.
           onReorder(fromIndex, toIndex);
         }
+      } else {
+        clearTargetHover();
       }
 
       // After a drag, suppress the upcoming click so it doesn't toggle selection.

@@ -2,6 +2,7 @@
 
 import { buildDeck, RANKS, CARD_POINTS, isWildcard } from "./cards.js";
 import { shuffleInPlace } from "./rng.js";
+import { validateNewSet } from "./rules.js";
 
 export const WILDCARD_ORDER = ["A","2","3","4","5","6","7","8","9","10","J","Q","K","A"];
 // Display labels per round. Distinct from WILDCARD_ORDER because the final round
@@ -50,7 +51,9 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     // `opens`: first set each player places in a round (used by Sniper).
     // `discards`: every discard, with wasWild flag (used by Whoopsie).
     // `rounds`: per-round meta (winner, dealer, # wildcards in winning play).
-    matchEvents: { opens: [], discards: [], rounds: [] },
+    // `setsPlayed`: every set placed/extended on the table — captures rank,
+    //   suit, length and wild count so we can score suit/rank/run achievements.
+    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [] },
   };
 }
 
@@ -175,12 +178,39 @@ export function placeNewSet(state, arrangement) {
   const wasFirstOpen = !player.hasOpened;
   player.hasOpened = true;
   if (wasFirstOpen) recordOpen(state, state.currentPlayerIndex);
+  recordSetPlayed(state, set, "open");
   return { ok: true, set };
 }
 
+function ensureMatchEvents(state) {
+  if (!state.matchEvents) {
+    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [] };
+  } else if (!Array.isArray(state.matchEvents.setsPlayed)) {
+    state.matchEvents.setsPlayed = [];
+  }
+}
+
 function recordOpen(state, playerIdx) {
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   state.matchEvents.opens.push({ round: state.round, playerIdx });
+}
+
+// kind: "open" | "extend". A set is logged on every change so achievement
+// evaluators see the final shape (run length, number-set count) at match end.
+function recordSetPlayed(state, set, kind) {
+  ensureMatchEvents(state);
+  const wildCount = set.cards.reduce((n, c) => n + (c.isWild ? 1 : 0), 0);
+  state.matchEvents.setsPlayed.push({
+    round: state.round,
+    playerIdx: set.ownerIndex,
+    setId: set.id,
+    type: set.type,
+    rank: set.type === "number" ? set.rank : undefined,
+    suit: set.type === "run" ? set.suit : undefined,
+    length: set.cards.length,
+    wildCount,
+    kind,
+  });
 }
 
 export function addToSet(state, setId, arrangement) {
@@ -201,6 +231,7 @@ export function addToSet(state, setId, arrangement) {
     }
     player.hand = player.hand.filter(c => !cardIds.includes(c.id));
     set.cards.push(...arrangement.added);
+    recordSetPlayed(state, set, "extend");
     return { ok: true };
   }
 
@@ -228,6 +259,7 @@ export function addToSet(state, setId, arrangement) {
     };
     return out;
   });
+  recordSetPlayed(state, set, "extend");
   return { ok: true };
 }
 
@@ -270,7 +302,7 @@ export function discard(state, cardId) {
   state.discardPile.push(card);
   state.lastDrawnCardId = null;
 
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   state.matchEvents.discards.push({
     round: state.round,
     playerIdx: state.currentPlayerIndex,
@@ -332,7 +364,7 @@ function finalizeRoundScoring(state) {
     cumulative: state.players.map(p => p.score),
   });
 
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   // How many wildcards did the winner have on the table this round? Used by Big Wild.
   let winnerWildsOnTable = 0;
   if (state.roundWinner != null) {
@@ -354,6 +386,94 @@ function finalizeRoundScoring(state) {
 
 export function isMatchOver(state) {
   return state.round >= TOTAL_ROUNDS && state.phase === "roundOver";
+}
+
+// ---------- No Way Out detection ----------
+//
+// A round is "no way out" when the table is frozen — no run exists and every
+// number set is capped at 4 — AND no player holds a hand that could legally
+// open a new set. With no adds, no opens, and no swap that shrinks a hand,
+// the round can never end on a winner; score everyone's current hand instead.
+
+function* combinations(n, k) {
+  if (k > n) return;
+  const idx = Array.from({ length: k }, (_, i) => i);
+  while (true) {
+    yield idx.slice();
+    let i = k - 1;
+    while (i >= 0 && idx[i] === n - k + i) i--;
+    if (i < 0) return;
+    idx[i]++;
+    for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
+  }
+}
+
+function tableFrozen(state) {
+  for (const s of state.table) {
+    if (s.type === "run") return false;
+    if (s.type === "number" && s.cards.length < 4) return false;
+  }
+  return true;
+}
+
+function canFormAnyNewSet(hand, state) {
+  if (hand.length < 3) return false;
+  const ranksOnTable = new Set(state.table.filter(s => s.type === "number").map(s => s.rank));
+  // Cap at 4 — number sets max out at 4 cards, runs can be larger but if a
+  // 3-card subset doesn't form a valid play, neither will any 4-card subset.
+  for (let size = 3; size <= Math.min(4, hand.length); size++) {
+    for (const idx of combinations(hand.length, size)) {
+      const subset = idx.map(i => hand[i]);
+      const v = validateNewSet(subset, state.wildcardRank);
+      if (!v.ok) continue;
+      if (v.type === "number" && ranksOnTable.has(v.rank)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isNoWayOut(state) {
+  if (state.phase === "roundOver") return false;
+  if (state.dealerOpeningPending) return false;
+  if (!tableFrozen(state)) return false;
+  for (const p of state.players) {
+    if (canFormAnyNewSet(p.hand, state)) return false;
+  }
+  return true;
+}
+
+// Score the current hands for everyone and end the round without a winner.
+// Mirrors finalizeRoundScoring but with roundWinner = null.
+export function finalizeNoWayOut(state) {
+  const wild = state.wildcardRank;
+  state.perRoundScores = state.players.map(p => {
+    let total = 0;
+    for (const c of p.hand) total += isWildcard(c, wild) ? 15 : CARD_POINTS[c.rank];
+    return total;
+  });
+  state.players.forEach((p, i) => { p.score += state.perRoundScores[i]; });
+  if (!Array.isArray(state.roundHistory)) state.roundHistory = [];
+  state.roundHistory.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx: null,
+    scores: state.perRoundScores.slice(),
+    cumulative: state.players.map(p => p.score),
+    noWayOut: true,
+  });
+  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [] };
+  state.matchEvents.rounds.push({
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    winnerIdx: null,
+    dealerIdx: state.dealerIndex,
+    openedOrder: state.matchEvents.opens.filter(o => o.round === state.round).map(o => o.playerIdx),
+    winnerWildsOnTable: 0,
+    noWayOut: true,
+  });
+  state.roundWinner = null;
+  state.phase = "roundOver";
 }
 
 export function advanceToNextRound(state) {
