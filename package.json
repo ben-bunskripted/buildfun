@@ -1,0 +1,10 @@
+{
+  "name": "buildfun",
+  "version": "1.0.0",
+  "private": true,
+  "description": "buildfun.co — static site + Netlify Functions for Benny online multiplayer",
+  "type": "module",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}

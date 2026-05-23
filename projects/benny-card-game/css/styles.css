@@ -1417,3 +1417,45 @@ body.hand-dragging textarea {
   .all-melds { flex-direction: row; flex-wrap: wrap; }
   .other-player { flex: 1 1 240px; min-width: 240px; }
 }
+
+/* ---------- Online multiplayer ---------- */
+.online-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.online-whoami { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.online-join-row { display: flex; gap: 8px; }
+.online-join-row .name-input { flex: 1; text-transform: uppercase; letter-spacing: 2px; }
+.online-browse-head {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.online-room-list { display: flex; flex-direction: column; gap: 8px; }
+.online-room-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.05);
+}
+.online-room-info { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.online-room-info strong { font-size: 14px; }
+.online-room-info span { color: var(--muted, rgba(255, 255, 255, 0.6)); }
+
+/* Lobby screen */
+.lobby-code-box { margin: 16px 0; text-align: center; }
+.lobby-code {
+  font-size: 40px; font-weight: 800; letter-spacing: 8px;
+  color: var(--gold); margin-top: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.lobby-players { margin: 16px 0; }
+.lobby-player-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.lobby-player {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+.lobby-player.is-disconnected { opacity: 0.5; }
+.lobby-tag {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--accent); background: rgba(74, 144, 226, 0.15);
+  padding: 2px 8px; border-radius: 999px;
+}
