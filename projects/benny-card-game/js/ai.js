@@ -37,6 +37,53 @@ function findSwappableWildFor(card, table, wildRank) {
   return null;
 }
 
+// ---------- Opponent modelling ----------
+//
+// "Threat" is a 0-200 score capturing how close an opponent looks to going
+// out. Hand size dominates; opened players who have melds are deadlier still.
+// Used to scale defensive penalties in chooseDiscard, and to flip HARD out
+// of long-game wildcard hoarding mode when the round is about to crash.
+function opponentThreat(state, oppIdx) {
+  const opp = state.players[oppIdx];
+  let score = 0;
+  if (opp.hand.length <= 1) score += 120;
+  else if (opp.hand.length === 2) score += 80;
+  else if (opp.hand.length === 3) score += 45;
+  else if (opp.hand.length === 4) score += 22;
+  else if (opp.hand.length === 5) score += 10;
+  if (opp.hasOpened) score += 25;
+  const oppMelds = state.table.filter(s => s.ownerIndex === oppIdx);
+  score += oppMelds.length * 8;
+  // Runs accept future adds — extra dangerous if the opponent owns one.
+  score += oppMelds.filter(s => s.type === "run").length * 6;
+  return score;
+}
+
+function maxOpponentThreat(state) {
+  let max = 0;
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === state.currentPlayerIndex) continue;
+    const t = opponentThreat(state, i);
+    if (t > max) max = t;
+  }
+  return max;
+}
+
+// Ranks an opponent has discarded at least once this round. Anything NOT
+// in this set is a rank they've shown no willingness to part with — could
+// be a tell that they're collecting it. Skip the heuristic for opponents
+// with <2 discards (insufficient signal).
+function opponentDiscardedRanks(state, oppIdx) {
+  const out = new Set();
+  let count = 0;
+  for (const d of (state.matchEvents && state.matchEvents.discards) || []) {
+    if (d.playerIdx !== oppIdx) continue;
+    out.add(d.rank);
+    count += 1;
+  }
+  return { ranks: out, count };
+}
+
 // How many copies of `rank` are accounted for outside opponents' hands? Used
 // when scoring wildcard placement in a run — a wild representing a rank with
 // many visible copies is harder for opponents to swap.
@@ -268,14 +315,38 @@ function chooseDiscard(state, difficulty) {
   // winning the round trumps everything.
   const goingOut = me.hand.length === 1;
 
+  // Opponent modelling — read once per discard call.
+  const threat = maxOpponentThreat(state);
+  const endgame = threat >= 80;          // someone has ≤2 cards left
+  // Threat scaling: a 1.0x multiplier at default, ramping up to ~2.0x in
+  // endgame so the CPU stops gifting adds even at the cost of higher hand
+  // value remaining.
+  const threatMult = 1 + Math.min(1, threat / 100);
+
+  // Per-opponent rank profiles (HARD only). A rank an opponent has never
+  // discarded — when they've had a chance to — is suspicious.
+  const oppProfiles = difficulty === "hard"
+    ? state.players.map((_, i) => i === state.currentPlayerIndex ? null : opponentDiscardedRanks(state, i))
+    : null;
+
   const candidates = pool.map(card => {
     let badness = -pointValue(card, wildRank); // unloading high value = good (lower badness)
     // Don't gift opponents — penalise discarding a card any opponent could
-    // bolt straight onto one of their melds.
-    for (const set of state.table) {
-      if (set.ownerIndex === state.currentPlayerIndex) continue;
-      const trial = validateAddition(set, [card], wildRank);
-      if (trial.ok) badness += difficulty === "hard" ? 100 : 60;
+    // bolt straight onto one of their melds. Scale by the highest-threat
+    // opponent so endgame play stops gifting cards entirely.
+    for (let oi = 0; oi < state.players.length; oi++) {
+      if (oi === state.currentPlayerIndex) continue;
+      const opp = state.players[oi];
+      for (const set of state.table) {
+        if (set.ownerIndex !== oi) continue;
+        const trial = validateAddition(set, [card], wildRank);
+        if (!trial.ok) continue;
+        const base = difficulty === "hard" ? 100 : 60;
+        // Weight the gift penalty by THIS opponent's threat, not the max —
+        // gifting a leader is worse than gifting a struggler.
+        const oppMult = 1 + Math.min(1, opponentThreat(state, oi) / 100);
+        badness += base * oppMult;
+      }
     }
     if (difficulty === "hard") {
       // Keeping pairs/adjacent cards is more valuable on hard.
@@ -283,14 +354,26 @@ function chooseDiscard(state, difficulty) {
       if (sameRank >= 2) badness += 8;
       const adj = me.hand.some(c => c.suit === card.suit && Math.abs(rankVal(c.rank) - rankVal(card.rank)) === 1);
       if (adj) badness += 4;
+      // Hoarded-rank avoidance: only meaningful once the opponent has done
+      // enough discarding to give a real signal (≥4 of their own), and even
+      // then only a light nudge — we don't want it to override the basic
+      // "shed high-value cards" rule unless threat is genuine.
+      if (!goingOut && oppProfiles) {
+        for (let oi = 0; oi < state.players.length; oi++) {
+          const prof = oppProfiles[oi];
+          if (!prof || prof.count < 4) continue;
+          if (!prof.ranks.has(card.rank)) badness += 6 * threatMult;
+        }
+      }
     } else { // medium
       const sameRank = me.hand.filter(c => c.rank === card.rank).length;
       if (sameRank >= 2) badness += 5;
     }
     // Don't drop a card we could swap for an already-played wildcard —
     // holding it lets us return the wild to our hand later, which is much
-    // more valuable than the card's raw rank.
-    if (!goingOut) {
+    // more valuable than the card's raw rank. Endgame disables the hoard
+    // since holding a 15-point wild is worse than getting caught with it.
+    if (!goingOut && !endgame) {
       const swap = findSwappableWildFor(card, state.table, wildRank);
       if (swap) badness += difficulty === "hard" ? 25 : 14;
     }
@@ -375,13 +458,25 @@ function applyPlayAndAddLoop(initialState, actions, difficulty) {
       let chosen = reps.find(p => p.wildCount * 2 <= p.cardIds.length) || reps[0];
       // Wildcard rationing for HARD: if we hold 3+ wildcards in total AND
       // the chosen play would dump 2+ of them, prefer a less wild-heavy
-      // alternative even if it frees fewer points.
-      if (difficulty === "hard") {
+      // alternative even if it frees fewer points. Endgame disables this —
+      // if an opponent is about to go out, shedding cards beats hoarding.
+      if (difficulty === "hard" && maxOpponentThreat(v) < 80) {
         const wildsInHand = me.hand.filter(c => isWildcard(c, wildRank)).length;
         if (wildsInHand >= 3 && chosen.wildCount >= 2) {
           const leaner = reps.find(p => p.wildCount < chosen.wildCount);
           if (leaner) chosen = leaner;
         }
+      }
+      // Endgame: when an opponent is one card from going out, prefer the
+      // play that frees the most cards (not just the most points) so we
+      // either catch up on the race or minimise residual hand value.
+      if (difficulty === "hard" && maxOpponentThreat(v) >= 80) {
+        reps.sort((a, b) => {
+          const dn = b.cardIds.length - a.cardIds.length;
+          if (dn !== 0) return dn;
+          return b.valueFreed - a.valueFreed;
+        });
+        chosen = reps[0];
       }
       actions.push({ type: "play", arrangement: chosen.arrangement, narration: describePlay(chosen.arrangement) });
       continue;
