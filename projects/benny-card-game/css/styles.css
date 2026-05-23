@@ -1258,8 +1258,12 @@ body.hand-dragging textarea {
 .tutorial-coach {
   position: fixed;
   /* Match the app's modal/panel styling (white card, dark ink) rather than a
-     one-off gold pill, so the instruction boxes read as part of the same UI. */
-  background: var(--panel);
+     one-off gold pill, so the instruction boxes read as part of the same UI.
+     Opaque (not the translucent --panel) so the centred intro/outro boxes and
+     the in-game coach boxes don't pick up different tints from whatever sits
+     behind them (dim overlay vs. navy felt) and end up looking like different
+     shades. */
+  background: #fff;
   color: var(--ink);
   border: 1px solid rgba(0,0,0,0.08);
   border-radius: 18px;
