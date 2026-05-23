@@ -103,17 +103,12 @@ function buildSteps() {
     },
     {
       kind: "modal",
-      text: "Your opponent is the dealer this round, so they go first with 8 cards. Tap Watch to see their turn.",
+      text: "Your opponent is the dealer this round, so they go first with 8 cards. Tap Watch — you'll see a recap of their turn, then pick up your own hand.",
       buttonLabel: "Watch",
       onAdvance: () => callbacks.beginGameplay(),
-      // Stay paused until the pass screen lands, so the recap modal isn't
-      // covered by the next coach.
-      awaitEvent: "passScreenShown",
-    },
-    {
-      kind: "coach",
-      text: "Now it's your turn. Tap Show hand to pick it up.",
-      targetSelector: "#pass-show",
+      // Solo vs CPU drops the human straight onto the play screen (no pass
+      // screen), firing "showHand" once their hand is dealt. Wait for that so
+      // the next coach lands on the live play screen.
       awaitEvent: "showHand",
     },
     {
