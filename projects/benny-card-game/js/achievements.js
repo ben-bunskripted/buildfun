@@ -22,8 +22,42 @@ export const MODE_LABELS = {
   scoring: "Scoring",
 };
 
+export const SUIT_NAMES = { S: "Spades", H: "Hearts", D: "Diamonds", C: "Clubs" };
+export const SUIT_GLYPHS = { S: "♠", H: "♥", D: "♦", C: "♣" };
+export const RANK_ORDER = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+export const RUN_TARGET = 13;
+
 function isCardDetailMode(summary) {
   return summary.mode !== "scoring";
+}
+
+// Reduce a match's per-set events into the final shape of each set on the
+// table by the time the round ended. `setsPlayed` logs every open + extend,
+// so keeping the last entry per setId gives us the final length/wildCount.
+function finalSetsFromEvents(summary) {
+  if (!isCardDetailMode(summary)) return [];
+  const events = (summary.matchEvents && summary.matchEvents.setsPlayed) || [];
+  const lastBySetId = new Map();
+  for (const e of events) lastBySetId.set(e.setId, e);
+  return Array.from(lastBySetId.values());
+}
+
+// Public: the same reduction, exposed so the profile updater can scan the
+// finalised match for suits, ranks, and longest-run feats per player.
+export function summariseSetsPerPlayer(summary) {
+  const out = {};
+  for (const player of summary.players) out[player.idx] = { runsBySuit: new Set(), quadsByRank: new Set(), longestRun: 0 };
+  for (const s of finalSetsFromEvents(summary)) {
+    const bucket = out[s.playerIdx];
+    if (!bucket) continue;
+    if (s.type === "run" && s.suit) {
+      bucket.runsBySuit.add(s.suit);
+      if (s.length > bucket.longestRun) bucket.longestRun = s.length;
+    } else if (s.type === "number" && s.length >= 4 && s.rank) {
+      bucket.quadsByRank.add(s.rank);
+    }
+  }
+  return out;
 }
 
 function roundsWonByPlayer(roundHistory, idx) {
@@ -189,6 +223,29 @@ export const ACHIEVEMENTS = [
       return !!last && last.winnerIdx === player.idx && last.round === summary.roundHistory.length && last.round === 14;
     },
   },
+  {
+    id: "long_runner", name: "Long Runner", icon: "🏃", category: "card", modes: PLAY_MODES,
+    description: "Lay down a run of 5 or more in a single match.",
+    evaluate: ({ player, summary }) =>
+      finalSetsFromEvents(summary).some(s => s.playerIdx === player.idx && s.type === "run" && s.length >= 5),
+  },
+  {
+    id: "quad_squad", name: "Quad Squad", icon: "🃏", category: "card", modes: PLAY_MODES,
+    description: "Lay down a 4-of-a-kind number set in a single match.",
+    evaluate: ({ player, summary }) =>
+      finalSetsFromEvents(summary).some(s => s.playerIdx === player.idx && s.type === "number" && s.length >= 4),
+  },
+  {
+    id: "rainbow_round", name: "Rainbow Round", icon: "🌈", category: "card", modes: PLAY_MODES,
+    description: "Play a run in all four suits in a single match.",
+    evaluate: ({ player, summary }) => {
+      const suits = new Set();
+      for (const s of finalSetsFromEvents(summary)) {
+        if (s.playerIdx === player.idx && s.type === "run" && s.suit) suits.add(s.suit);
+      }
+      return suits.size >= 4;
+    },
+  },
 
   // ---- Lifetime / meta (any mode — but counted per-mode) ----
   {
@@ -220,6 +277,65 @@ export const ACHIEVEMENTS = [
     evaluate: ({ summary, profile }) => priorAchievementsInMode(profile, summary.mode) >= 9,
   },
 ];
+
+// Progress-based, lifetime, per-mode achievements. Unlike the one-shot
+// evaluators above, these track cumulative card-play feats across every match
+// in the mode — the profile screen draws each as a bar growing toward target.
+// Storage lives on each profile under `progress[mode]`.
+//
+// Shape: { id, name, icon, description, target, modes,
+//          progressLabel(value), itemDetail(progress) }
+//   progress is read from profile.progress[mode][id].value (number) and
+//   .items (object, e.g. {S: true, H: true}) for the multi-item variants.
+export const PROGRESS_ACHIEVEMENTS = [
+  {
+    id: "suit_sampler",
+    name: "Suit Sampler",
+    icon: "🌈",
+    description: "Play a run with each of the four suits.",
+    target: 4,
+    modes: PLAY_MODES,
+    // Render: ♠ ♥ ♦ ♣ chips, lit when present in .items.
+    items: { keys: ["S", "H", "D", "C"], labelFor: (k) => SUIT_GLYPHS[k], titleFor: (k) => SUIT_NAMES[k] },
+  },
+  {
+    id: "quad_collector",
+    name: "Quad Collector",
+    icon: "🎴",
+    description: "Lay down a 4-of-a-kind number set for every rank.",
+    target: 13,
+    modes: PLAY_MODES,
+    items: { keys: RANK_ORDER.slice(), labelFor: (k) => k, titleFor: (k) => `Rank ${k}` },
+  },
+  {
+    id: "long_run",
+    name: "Long Run",
+    icon: "🏃",
+    description: "Build the longest run you can — A through K.",
+    target: RUN_TARGET,
+    modes: PLAY_MODES,
+    // No item chips — just a bar growing to 13.
+  },
+];
+
+export function progressAchievementById(id) {
+  return PROGRESS_ACHIEVEMENTS.find(a => a.id === id) || null;
+}
+
+// Read progress for one player in one mode. Returns { suit_sampler: {value, items}, ... }
+// Defaults every progress achievement to zero so the renderer can always show a bar.
+export function readProgress(profile, mode) {
+  const out = {};
+  const raw = (profile && profile.progress && profile.progress[mode]) || {};
+  for (const def of PROGRESS_ACHIEVEMENTS) {
+    const row = raw[def.id] || {};
+    out[def.id] = {
+      value: Math.max(0, Math.min(def.target, row.value || 0)),
+      items: row.items ? { ...row.items } : {},
+    };
+  }
+  return out;
+}
 
 // Run every achievement against every player. Returns { [playerIdx]: [id,...] }.
 // Profiles param is the *current* profiles store (pre-record) so lifetime

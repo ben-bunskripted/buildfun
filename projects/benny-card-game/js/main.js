@@ -18,7 +18,10 @@ import {
 import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot } from "./storage.js";
 import * as tutorial from "./tutorial.js";
 import { loadProfiles, saveProfiles, buildMatchSummary, recordMatch, listKnownPlayers, achievementById, keyFor as profileKeyFor } from "./profiles.js";
-import { ACHIEVEMENTS, ALL_MODES, MODE_LABELS } from "./achievements.js";
+import {
+  ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS, ALL_MODES, MODE_LABELS,
+  readProgress, SUIT_GLYPHS, SUIT_NAMES,
+} from "./achievements.js";
 
 // ---------- App state ----------
 let state = null;        // active match state (multiplayer/cpu) OR scoring state
@@ -52,7 +55,17 @@ let ui = {
   // Hand layout: true = cards fan with heavy overlap + per-card tilt; false =
   // spread out with minimal overlap. Default fanned.
   handFanned: true,
+  // Card-size override applied as `data-card-size` on <html>. "m" is the
+  // breakpoint-driven default (no override); s/l/xl scale the --card-w/h vars.
+  cardSize: "m",
 };
+
+const CARD_SIZE_VALUES = new Set(["s", "m", "l", "xl"]);
+
+function applyCardSizePref(size) {
+  const value = CARD_SIZE_VALUES.has(size) ? size : "m";
+  document.documentElement.dataset.cardSize = value;
+}
 
 // Apply persisted card style preference before any cards are rendered.
 {
@@ -63,7 +76,11 @@ let ui = {
   if (typeof prefs.handFanned === "boolean") {
     ui.handFanned = prefs.handFanned;
   }
+  if (CARD_SIZE_VALUES.has(prefs.cardSize)) {
+    ui.cardSize = prefs.cardSize;
+  }
   setCardStyle(ui.cardStyle);
+  applyCardSizePref(ui.cardSize);
 }
 
 // ---------- Persistence ----------
@@ -173,6 +190,21 @@ function buildStart() {
     ui.cardStyle = btn.dataset.style;
     setCardStyle(ui.cardStyle);
     savePrefs({ ...loadPrefs(), cardStyle: ui.cardStyle });
+  });
+
+  // Card size picker — overrides the breakpoint-driven default.
+  const sizeSeg = $("card-size-seg");
+  sizeSeg.querySelectorAll(".seg-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.size === ui.cardSize);
+  });
+  sizeSeg.addEventListener("click", (e) => {
+    const btn = e.target.closest(".seg-btn");
+    if (!btn) return;
+    sizeSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    ui.cardSize = btn.dataset.size;
+    applyCardSizePref(ui.cardSize);
+    savePrefs({ ...loadPrefs(), cardSize: ui.cardSize });
   });
 
   $("start-btn").addEventListener("click", onStartMatch);
@@ -652,6 +684,25 @@ function renderAll() {
   // The tutorial highlights live nodes; re-apply after every re-render so the
   // glow follows freshly-built hand cards / table cards.
   tutorial.refreshHighlights();
+  // Defer one tick so the browser has measured the new card widths.
+  requestAnimationFrame(updateMeldOverflowFlags);
+}
+
+// Toggle .has-overflow-left / .has-overflow-right on every meld whose cards
+// exceed the visible scroll width. Called after each render and on resize /
+// meld scroll so the gold edge fades stay accurate.
+function updateMeldOverflowFlags() {
+  const melds = document.querySelectorAll("#all-melds .meld");
+  melds.forEach(meldOverflowUpdate);
+}
+function meldOverflowUpdate(meld) {
+  const max = meld.scrollWidth - meld.clientWidth;
+  if (max <= 2) {
+    meld.classList.remove("has-overflow-left", "has-overflow-right");
+    return;
+  }
+  meld.classList.toggle("has-overflow-left", meld.scrollLeft > 2);
+  meld.classList.toggle("has-overflow-right", meld.scrollLeft < max - 2);
 }
 
 function renderTopBar() {
@@ -730,6 +781,7 @@ function renderMeld(set) {
     cardEl.dataset.positionIndex = String(i);
     el.appendChild(cardEl);
   }
+  el.addEventListener("scroll", () => meldOverflowUpdate(el), { passive: true });
   return el;
 }
 
@@ -1424,18 +1476,25 @@ function recordAndRenderRewards() {
   if (!state) return;
   const profiles = loadProfiles();
   const summary = buildMatchSummary(state);
-  const { newUnlocks } = recordMatch(profiles, summary);
+  const { newUnlocks, progressUnlocks, progressGains } = recordMatch(profiles, summary);
   saveProfiles(profiles);
 
-  const playerIdxs = Object.keys(newUnlocks).map(Number);
-  if (!playerIdxs.length) return;
+  // Union of every player who has anything new to celebrate.
+  const allIdxs = new Set([
+    ...Object.keys(newUnlocks).map(Number),
+    ...Object.keys(progressUnlocks).map(Number),
+    ...Object.keys(progressGains).map(Number),
+  ]);
+  if (!allIdxs.size) return;
 
   const title = document.createElement("h3");
   title.className = "sc-history-title";
   title.textContent = "Rewards earned";
   host.appendChild(title);
 
-  for (const idx of playerIdxs) {
+  // Look up the player's POST-record profile so progress bars in the rewards
+  // block reflect the just-folded match.
+  for (const idx of allIdxs) {
     const p = state.players[idx];
     const block = document.createElement("div");
     block.className = "rewards-block";
@@ -1443,14 +1502,36 @@ function recordAndRenderRewards() {
     head.className = "rewards-name";
     head.textContent = p.name;
     block.appendChild(head);
-    const grid = document.createElement("div");
-    grid.className = "rewards-grid";
-    for (const id of newUnlocks[idx]) {
-      const a = achievementById(id);
-      if (!a) continue;
-      grid.appendChild(renderAchievementCard(a, true));
+
+    // 1) one-shot unlocks earned this match
+    const oneShots = newUnlocks[idx] || [];
+    if (oneShots.length) {
+      const grid = document.createElement("div");
+      grid.className = "rewards-grid";
+      for (const id of oneShots) {
+        const a = achievementById(id);
+        if (!a) continue;
+        grid.appendChild(renderAchievementCard(a, true));
+      }
+      block.appendChild(grid);
     }
-    block.appendChild(grid);
+
+    // 2) progress achievements that gained ground (including ones that just
+    //    completed) — show the bar with the newly-earned items pulsing gold.
+    const gains = progressGains[idx] || [];
+    if (gains.length) {
+      const prof = profiles.players[profileKeyFor(p.name)];
+      const progress = readProgress(prof, summary.mode);
+      const wrap = document.createElement("div");
+      wrap.className = "rewards-progress-block";
+      for (const gain of gains) {
+        const def = PROGRESS_ACHIEVEMENTS.find(a => a.id === gain.id);
+        if (!def) continue;
+        const justEarned = new Set(gain.newItems || []);
+        wrap.appendChild(renderProgressAchievementCard(def, progress[def.id], justEarned));
+      }
+      block.appendChild(wrap);
+    }
     host.appendChild(block);
   }
 }
@@ -1465,6 +1546,46 @@ function renderAchievementCard(a, unlocked) {
       <div class="achievement-desc">${escapeHTML(a.description)}</div>
     </div>
   `;
+  return el;
+}
+
+// Render a progress achievement: name + description + bar growing to target,
+// plus per-item chips for the multi-item ones (suits / ranks). `justEarned`
+// is the set of items the just-finished match contributed, so they pulse.
+function renderProgressAchievementCard(def, progress, justEarned = new Set()) {
+  const value = Math.max(0, Math.min(def.target, progress.value || 0));
+  const unlocked = value >= def.target;
+  const pct = Math.round((value / def.target) * 100);
+  const el = document.createElement("div");
+  el.className = `achievement-card has-progress ${unlocked ? "is-unlocked" : ""}`;
+  const info = document.createElement("div");
+  info.className = "achievement-info";
+  info.innerHTML = `
+    <div class="achievement-name">${escapeHTML(def.name)}</div>
+    <div class="achievement-desc">${escapeHTML(def.description)}</div>
+    <div class="achievement-progress">
+      <div class="achievement-progress-track"><div class="achievement-progress-fill" style="width:${pct}%"></div></div>
+      <span class="achievement-progress-label">${value} / ${def.target}</span>
+    </div>
+  `;
+  if (def.items) {
+    const items = document.createElement("div");
+    items.className = "achievement-items";
+    for (const key of def.items.keys) {
+      const chip = document.createElement("span");
+      const on = !!(progress.items && progress.items[key]);
+      const isJust = justEarned.has(key);
+      let suitClass = "";
+      if (def.id === "suit_sampler") suitClass = ` suit-${key.toLowerCase()}`;
+      chip.className = `achievement-item${suitClass}${on ? " is-on" : ""}${isJust ? " is-just-earned" : ""}`;
+      chip.textContent = def.items.labelFor(key);
+      chip.title = def.items.titleFor(key);
+      items.appendChild(chip);
+    }
+    info.appendChild(items);
+  }
+  el.innerHTML = `<div class="achievement-icon" aria-hidden="true">${def.icon || "🏅"}</div>`;
+  el.appendChild(info);
   return el;
 }
 
@@ -1641,13 +1762,18 @@ function ordinal(n) {
 function renderProfileAchievements(profile, mode) {
   const host = $("profile-achievements");
   host.innerHTML = "";
-  // Achievements unlocked IN THIS MODE only — separate from other modes.
+  // Progress achievements (suits / quads / long run) go first so the bars are
+  // the first thing a returning player sees.
+  const progress = readProgress(profile, mode);
+  for (const def of PROGRESS_ACHIEVEMENTS) {
+    if (!def.modes.includes(mode)) continue;
+    host.appendChild(renderProgressAchievementCard(def, progress[def.id]));
+  }
+  // Then the one-shot achievements: unlocked first, then locked.
   const unlockedIds = new Set(profile.achievements
     .filter(a => a.matchContext && a.matchContext.mode === mode)
     .map(a => a.id));
-  // Only include achievements eligible in the selected mode.
   const eligible = ACHIEVEMENTS.filter(a => !a.modes || a.modes.includes(mode));
-  // Unlocked first, then locked. Stable within group.
   const sorted = eligible.slice().sort((a, b) => {
     const au = unlockedIds.has(a.id) ? 0 : 1;
     const bu = unlockedIds.has(b.id) ? 0 : 1;
@@ -1814,7 +1940,10 @@ function boot() {
   wireUp();
   renderResumeBanner();
   setupCardZoom();
-  window.addEventListener("resize", layoutHand);
+  window.addEventListener("resize", () => {
+    layoutHand();
+    updateMeldOverflowFlags();
+  });
   showScreen("screen-start");
   showWelcomeModalIfNeeded();
 }

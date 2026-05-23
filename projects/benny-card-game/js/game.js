@@ -50,7 +50,9 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     // `opens`: first set each player places in a round (used by Sniper).
     // `discards`: every discard, with wasWild flag (used by Whoopsie).
     // `rounds`: per-round meta (winner, dealer, # wildcards in winning play).
-    matchEvents: { opens: [], discards: [], rounds: [] },
+    // `setsPlayed`: every set placed/extended on the table — captures rank,
+    //   suit, length and wild count so we can score suit/rank/run achievements.
+    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [] },
   };
 }
 
@@ -175,12 +177,39 @@ export function placeNewSet(state, arrangement) {
   const wasFirstOpen = !player.hasOpened;
   player.hasOpened = true;
   if (wasFirstOpen) recordOpen(state, state.currentPlayerIndex);
+  recordSetPlayed(state, set, "open");
   return { ok: true, set };
 }
 
+function ensureMatchEvents(state) {
+  if (!state.matchEvents) {
+    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [] };
+  } else if (!Array.isArray(state.matchEvents.setsPlayed)) {
+    state.matchEvents.setsPlayed = [];
+  }
+}
+
 function recordOpen(state, playerIdx) {
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   state.matchEvents.opens.push({ round: state.round, playerIdx });
+}
+
+// kind: "open" | "extend". A set is logged on every change so achievement
+// evaluators see the final shape (run length, number-set count) at match end.
+function recordSetPlayed(state, set, kind) {
+  ensureMatchEvents(state);
+  const wildCount = set.cards.reduce((n, c) => n + (c.isWild ? 1 : 0), 0);
+  state.matchEvents.setsPlayed.push({
+    round: state.round,
+    playerIdx: set.ownerIndex,
+    setId: set.id,
+    type: set.type,
+    rank: set.type === "number" ? set.rank : undefined,
+    suit: set.type === "run" ? set.suit : undefined,
+    length: set.cards.length,
+    wildCount,
+    kind,
+  });
 }
 
 export function addToSet(state, setId, arrangement) {
@@ -201,6 +230,7 @@ export function addToSet(state, setId, arrangement) {
     }
     player.hand = player.hand.filter(c => !cardIds.includes(c.id));
     set.cards.push(...arrangement.added);
+    recordSetPlayed(state, set, "extend");
     return { ok: true };
   }
 
@@ -228,6 +258,7 @@ export function addToSet(state, setId, arrangement) {
     };
     return out;
   });
+  recordSetPlayed(state, set, "extend");
   return { ok: true };
 }
 
@@ -270,7 +301,7 @@ export function discard(state, cardId) {
   state.discardPile.push(card);
   state.lastDrawnCardId = null;
 
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   state.matchEvents.discards.push({
     round: state.round,
     playerIdx: state.currentPlayerIndex,
@@ -332,7 +363,7 @@ function finalizeRoundScoring(state) {
     cumulative: state.players.map(p => p.score),
   });
 
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [] };
+  ensureMatchEvents(state);
   // How many wildcards did the winner have on the table this round? Used by Big Wild.
   let winnerWildsOnTable = 0;
   if (state.roundWinner != null) {

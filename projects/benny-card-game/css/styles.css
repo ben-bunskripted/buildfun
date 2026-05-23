@@ -40,6 +40,14 @@
   :root { --card-w: 86px; --card-h: 134px; }
 }
 
+/* User-chosen card-size override (start-screen setting). "m" is the default
+   and intentionally leaves the breakpoints in charge; s/l/xl pin a size that
+   beats every media query because these rules appear later. Keep ratio 212:329
+   (~0.644) so the SVG assets render unsquashed. */
+html[data-card-size="s"]  { --card-w: 48px;  --card-h: 75px;  }
+html[data-card-size="l"]  { --card-w: 96px;  --card-h: 149px; }
+html[data-card-size="xl"] { --card-w: 120px; --card-h: 186px; }
+
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
@@ -547,10 +555,30 @@ body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
+  position: relative;
 }
 .meld::-webkit-scrollbar { display: none; }
 .meld.selectable { cursor: pointer; outline: 2px dashed transparent; transition: outline-color 0.15s; }
 .meld.selectable:hover { outline-color: rgba(245,196,81,0.6); }
+
+/* Overflow indicators — added by main.js when a meld's content extends past
+   the visible edge. Box-shadow + accent border live on the scroll container
+   itself, so they stay pinned to the visible edge as cards scroll past. On
+   mobile the meld is full-width, so this reads as "the cards run off the
+   side of the screen". */
+.meld.has-overflow-right {
+  box-shadow: inset -36px 0 24px -16px rgba(6,18,42,0.9);
+  border-right: 2px solid rgba(245,196,81,0.85);
+}
+.meld.has-overflow-left {
+  box-shadow: inset 36px 0 24px -16px rgba(6,18,42,0.9);
+  border-left: 2px solid rgba(245,196,81,0.85);
+}
+.meld.has-overflow-left.has-overflow-right {
+  box-shadow:
+    inset 36px 0 24px -16px rgba(6,18,42,0.9),
+    inset -36px 0 24px -16px rgba(6,18,42,0.9);
+}
 @media (max-width: 720px) {
   .melds { flex-direction: column; flex-wrap: nowrap; }
   .meld { width: 100%; }
@@ -881,9 +909,69 @@ body.hand-dragging textarea {
   width: 32px; text-align: center;
   flex: 0 0 auto;
 }
-.achievement-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.achievement-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .achievement-name { font-size: 14px; font-weight: 700; color: var(--ink); }
 .achievement-desc { font-size: 12px; color: var(--ink-soft); }
+
+/* Progress bar variant — shown on lifetime achievements that grow over many
+   matches (Suit Sampler, Quad Collector, Long Run). The bar fills with the
+   gold accent and switches to a deeper gold on full completion. */
+.achievement-progress {
+  display: flex; align-items: center; gap: 8px; margin-top: 2px;
+}
+.achievement-progress-track {
+  flex: 1; height: 8px; border-radius: 999px;
+  background: rgba(0,0,0,0.10);
+  overflow: hidden;
+  position: relative;
+}
+.achievement-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f5c451, #c9963a);
+  border-radius: 999px;
+  transition: width 0.4s ease-out;
+}
+.achievement-card.is-unlocked .achievement-progress-fill {
+  background: linear-gradient(90deg, #f7d97c, #b8841e);
+}
+.achievement-progress-label {
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--ink-soft); flex: 0 0 auto;
+  min-width: 28px; text-align: right;
+}
+.achievement-card.is-unlocked .achievement-progress-label { color: var(--ink); }
+.achievement-items {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
+}
+.achievement-item {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12px; font-weight: 700;
+  background: rgba(0,0,0,0.06); color: var(--ink-soft);
+  border: 1px solid rgba(0,0,0,0.06);
+  font-variant-numeric: tabular-nums;
+}
+.achievement-item.is-on {
+  background: linear-gradient(180deg, #fff5d6, #fde9b0);
+  color: var(--ink);
+  border-color: rgba(201,150,58,0.55);
+}
+.achievement-item.suit-h, .achievement-item.suit-d { color: #c0392b; }
+.achievement-item.suit-s, .achievement-item.suit-c { color: var(--ink); }
+.achievement-item.is-just-earned {
+  box-shadow: 0 0 0 2px rgba(245,196,81,0.7);
+  animation: pulseGold 1.6s ease-out 1;
+}
+@keyframes pulseGold {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+}
+
+.rewards-progress-block {
+  margin-top: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
 
 /* ---------- Profile screen ---------- */
 .profile-wrap { padding: 16px; display: flex; justify-content: center; }
