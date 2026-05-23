@@ -357,13 +357,22 @@ function showModeBlock() {
   //  - Scoring mode renders no cards, so card style/size are irrelevant.
   const setShown = (id, shown) => $(id) && $(id).classList.toggle("hidden", !shown);
   setShown("field-animate-cpu", ui.mode === "cpu");
-  setShown("field-card-style", ui.mode !== "scoring");
-  setShown("field-card-size", ui.mode !== "scoring");
+  applyCardFieldVisibility();
   // Online has its own create/join buttons in the block — the generic
   // "Start match" button and tutorial link don't apply.
   setShown("start-btn", ui.mode !== "online");
   setShown("tutorial-row", ui.mode !== "online" && !loadPrefs().hideTutorial);
   setShown("tutorial-foot-btn", ui.mode !== "online");
+}
+
+// Card style/size only apply to modes that render cards, and in Online mode we
+// hide them until the player has signed in (the block is sign-in-first).
+function applyCardFieldVisibility() {
+  const lockedOut = ui.mode === "online" && !net.currentUser();
+  const show = ui.mode !== "scoring" && !lockedOut;
+  const setShown = (id, s) => $(id) && $(id).classList.toggle("hidden", !s);
+  setShown("field-card-style", show);
+  setShown("field-card-size", show);
 }
 
 // Switch the selected mode, sync the segmented control + dependent UI, and
@@ -2643,6 +2652,7 @@ function refreshOnlineModeBlock() {
   const user = net.currentUser();
   signedOut.classList.toggle("hidden", !!user);
   signedIn.classList.toggle("hidden", !user);
+  applyCardFieldVisibility();
   if (user) {
     $("online-user-name").textContent = user.name || user.email || "Player";
     const dn = $("online-display-name");
