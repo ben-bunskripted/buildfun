@@ -2,7 +2,10 @@
 // existing seat is returned. Validates password (private), capacity, and that
 // the room is still in the lobby.
 
-import { db, getUser, json, parseBody, verifyPassword } from "./_lib.mjs";
+import {
+  db, getUser, json, parseBody, verifyPassword,
+  countActiveRoomsForUser, MAX_ACTIVE_ROOMS_PER_USER,
+} from "./_lib.mjs";
 
 async function roomSnapshot(sql, roomId) {
   const seats = await sql`SELECT seat_index, uid, display_name, connected
@@ -27,15 +30,24 @@ export const handler = async (event, context) => {
     if (rooms.length === 0) return json(404, { error: "no game with that code" });
     const room = rooms[0];
 
-    // Already seated? Return existing seat (rejoin / refresh).
+    // Already seated? Return existing seat (rejoin / refresh). For an
+    // in-progress game we also return the live state + last_turn so the client
+    // can adopt immediately — without this, the client's first poll asks
+    // `since = currentSeq` and the server long-polls up to ~9s waiting for a
+    // newer seq, leaving the rejoiner stuck on a "Joining game…" splash.
     const mine = await sql`SELECT seat_index FROM room_seats WHERE room_id = ${code} AND uid = ${user.uid}`;
     if (mine.length > 0) {
       await sql`UPDATE room_seats SET connected = true WHERE room_id = ${code} AND uid = ${user.uid}`;
-      const game = await sql`SELECT seq, status FROM games WHERE room_id = ${code}`;
+      const game = await sql`SELECT seq, status, state, last_turn, current_seat FROM games WHERE room_id = ${code}`;
+      const g = game[0];
+      const inPlay = g && (g.status === "playing" || g.status === "finished");
       return json(200, {
         roomId: code, name: room.name, status: room.status, maxPlayers: room.max_players,
         seat: mine[0].seat_index, isHost: room.host_uid === user.uid,
-        seq: game[0] ? Number(game[0].seq) : 0,
+        seq: g ? Number(g.seq) : 0,
+        currentSeat: g ? g.current_seat : 0,
+        state: inPlay ? (g.state || null) : null,
+        lastTurn: inPlay ? (g.last_turn || null) : null,
         players: await roomSnapshot(sql, code),
       });
     }
@@ -44,6 +56,16 @@ export const handler = async (event, context) => {
     if (room.visibility === "private") {
       const ok = await verifyPassword(String(password || ""), room.password_hash);
       if (!ok) return json(403, { error: "wrong password" });
+    }
+
+    // Per-user table cap (only checked for NEW seats — rejoins above bypass).
+    const activeCount = await countActiveRoomsForUser(sql, user.uid);
+    if (activeCount >= MAX_ACTIVE_ROOMS_PER_USER) {
+      return json(409, {
+        error: `You already have ${activeCount} open tables — archive one before joining a new game.`,
+        code: "table-cap",
+        cap: MAX_ACTIVE_ROOMS_PER_USER,
+      });
     }
 
     // Allocate the lowest free seat index, retrying on a concurrent grab.

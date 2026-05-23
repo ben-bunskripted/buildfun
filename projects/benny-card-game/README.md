@@ -1,36 +1,62 @@
-# Benny — hot-seat card game
+# Benny — card game
 
-A 2-to-4-player card game for a single device, passed between players. 14
-rounds, lowest cumulative score wins. Built as a static site — no build
-step, no backend, no dependencies.
+A 2-to-4-player card game. 14 rounds, lowest cumulative score wins. The
+hot-seat modes are a static site — no build step, no backend, no
+dependencies. Online play adds a thin Netlify Functions + Neon
+Postgres backend, but the client itself is still vanilla ES modules.
 
 ## Modes
 
-Pick one at the start screen:
+Pick one from the start screen:
 
 - **Multiplayer** — the classic hot-seat experience. The device passes
   between humans; each turn is gated by a "Show hand" screen.
 - **Solo vs CPU** — one human plus 1–3 CPU opponents. Each opponent has
-  its own difficulty (Easy / Medium / Hard). CPU turns resolve invisibly
-  and surface as a recap card ("Sam (CPU) drew, played K-K-K,
-  discarded 4♥") that you tap through.
+  its own difficulty (Easy / Medium / Hard). CPU turns either animate
+  on the table or pop a recap card you tap through — configurable.
 - **Scoring only** — companion for in-real-life play. The app deals
   nothing; you enter the winner and each loser's hand total per round,
   and it keeps cumulative scores across the 14 rounds.
+- **Online** — live, turn-based multiplayer. Sign in with Google or
+  email (Netlify Identity), create or join a table, share the code,
+  and play. Opponents' turns replay on your screen with the same
+  animation the CPU uses.
 
-In-progress matches in any mode persist to `localStorage`, so closing
-the tab or reloading offers a **Resume match** banner.
+In-progress matches in any local mode persist to `localStorage` —
+each mode keeps its own slot, so a paused Solo game won't get wiped
+when you start a Scoring session. The resume banner on the start
+screen offers the most recent saved match back. Online matches you've
+joined show up in a "My tables" list and resume on the server.
+
+## First-time tutorial
+
+The first time you open Benny, a one-line "Try the tutorial" link
+appears next to **Start match**. It deals a pre-seeded round against a
+single CPU and walks through draw → play sets → discard with coach
+balloons. Replay it any time from the bottom of the start panel.
+
+## Settings
+
+From the start screen or the top-bar hamburger inside a match:
+
+- **Card size** — S / M / L / XL.
+- **Fan vs spread** — fanned hand with per-card tilt, or spread out.
+- **Card art** — modern (SVG) or classic (DOM-rendered, pip-grid).
+- **Animate CPU moves** — on-table animation vs recap card.
 
 ## Run locally
 
 From inside this folder:
 
-```
+```sh
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000` in your browser. (Any static file server
-works — `npx serve`, `caddy file-server`, etc.)
+Then open `http://localhost:8000` in your browser. (Any static file
+server works — `npx serve`, `caddy file-server`, etc.) This serves the
+hot-seat modes only. Online mode needs the Netlify dev server with the
+functions running and a Neon DB attached — see
+[../../ONLINE_SETUP.md](../../ONLINE_SETUP.md).
 
 ## Cross-browser test plan
 
@@ -69,22 +95,32 @@ The game is mobile-first and targets the latest **Chrome**, **Safari**, and
 
 ## Project layout
 
-```
+```text
 benny-card-game/
 ├── index.html
+├── manifest.webmanifest    # PWA manifest (installable, standalone)
+├── sw.js                   # Service worker — cache-first shell + offline fallback
 ├── css/styles.css
-├── js/
-│   ├── main.js        # UI controller, mode router, screen orchestration
-│   ├── game.js        # State machine (deal, draw, play, discard, scoring)
-│   ├── rules.js       # Set / run / addition / swap validation
-│   ├── ai.js          # CPU decision engine (Easy / Medium / Hard)
-│   ├── scoring.js     # Scoring-mode state machine (no engine, no deck)
-│   ├── storage.js     # localStorage persistence for in-progress matches
-│   ├── cards.js       # Card model, deck, DOM card renderer (pips, portraits)
-│   ├── dragdrop.js    # Hand reordering via pointer events (iOS-safe)
-│   └── rng.js         # crypto.getRandomValues + Fisher-Yates shuffle
-└── README.md
+└── js/
+    ├── main.js             # UI controller, mode router, screen orchestration
+    ├── game.js             # State machine (deal, draw, play, discard, scoring)
+    ├── rules.js            # Set / run / addition / swap validation
+    ├── ai.js               # CPU decision engine (Easy / Medium / Hard)
+    ├── scoring.js          # Scoring-mode state machine (no engine, no deck)
+    ├── tutorial.js         # First-time interactive tutorial
+    ├── net.js              # Online transport + Netlify Identity wrapper
+    ├── online.js           # Online session controller (lobby, turns, replay)
+    ├── storage.js          # localStorage: per-mode match slots + prefs
+    ├── profiles.js         # Lifetime per-player stats + match history
+    ├── achievements.js     # Registry + evaluators run at match-end
+    ├── cards.js            # Card model, deck, DOM renderer (pips, portraits)
+    ├── dragdrop.js         # Hand reordering via pointer events (iOS-safe)
+    └── rng.js              # crypto.getRandomValues + Fisher-Yates shuffle
 ```
+
+The online backend lives at the repository root in
+[../../netlify/functions/](../../netlify/functions/) — see
+[CLAUDE.md](./CLAUDE.md) for the full backend layout.
 
 ## Rules summary
 
@@ -103,6 +139,9 @@ key invariants the game enforces:
   player is prompted to choose.
 - Cards left in hand at round end score face value (J=11, Q=12, K=13,
   A=14) — wildcards count 15 regardless. Round winner scores 0.
+- **No Way Out**: if neither the deck nor the discard pile can produce
+  a legal move for anyone (no opener, no addition, no swap), the round
+  ends as a draw — everyone scores their hand, nobody wins the round.
 
 ## Notes
 

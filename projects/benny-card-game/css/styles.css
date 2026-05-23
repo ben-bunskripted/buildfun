@@ -514,6 +514,9 @@ body {
   outline: none;
 }
 .top-bar-menu-list .menu-item:active { background: rgba(255,255,255,0.16); }
+/* Destructive menu items (End game) keep the same hover treatment but render
+   the label in the danger colour so the difference is obvious. */
+.top-bar-menu-list .menu-item.danger-item { color: var(--danger, #d96a5b); }
 
 /* Non-button content inside the menu — currently the Card size picker. The
    segmented control is reskinned dark to match the rest of the menu (the
@@ -1473,10 +1476,34 @@ body.hand-dragging textarea {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
 }
 .online-room-list { display: flex; flex-direction: column; gap: 8px; }
+/* Swipe-to-reveal: the wrap clips overflow so the action panel underneath the
+   row stays hidden until the row slides left. */
+.online-room-row-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: pan-y;       /* let vertical scroll pass through, claim x */
+}
+.online-room-actions {
+  position: absolute; inset: 0;
+  display: flex; justify-content: flex-end; align-items: stretch;
+  z-index: 0;
+}
+.online-room-actions .row-action {
+  border: none; min-width: 88px; font-weight: 600; font-size: 14px;
+  color: #fff; cursor: pointer; padding: 0 14px;
+}
+.online-room-actions .row-action.archive { background: #6b7280; }
+.online-room-actions .row-action.end { background: var(--danger, #d96a5b); }
 .online-room-row {
+  position: relative; z-index: 1;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 12px; border-radius: 10px; background: #eef3f0;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  transition: transform 180ms ease-out;
+  will-change: transform;
+  user-select: none;
 }
 .online-room-info { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .online-room-info strong { font-size: 14px; }
@@ -1507,6 +1534,13 @@ body.hand-dragging textarea {
   color: var(--ink); font-weight: 600;
 }
 .lobby-player.is-disconnected { opacity: 0.5; }
+.lobby-player.is-empty {
+  background: transparent;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-style: italic;
+}
 .lobby-tag {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
   color: var(--accent-deep, #1f5fa0); background: rgba(74, 144, 226, 0.15);

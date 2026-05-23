@@ -68,3 +68,17 @@ export function makeRoomCode(len = 5) {
   for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
   return out;
 }
+
+// ---- Per-user active-table cap ----
+// A user can hold at most this many seats across non-finished rooms at once.
+// Hitting the cap forces them to archive an old table before joining/creating.
+export const MAX_ACTIVE_ROOMS_PER_USER = 10;
+
+export async function countActiveRoomsForUser(sql, uid) {
+  const rows = await sql`
+    SELECT COUNT(*)::int AS n
+    FROM room_seats s
+    JOIN rooms r ON r.id = s.room_id
+    WHERE s.uid = ${uid} AND r.status != 'finished'`;
+  return rows[0] ? Number(rows[0].n) : 0;
+}

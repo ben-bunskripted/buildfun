@@ -16,13 +16,17 @@ export const handler = async (event, context) => {
 
   const sql = db();
   try {
-    const rooms = await sql`SELECT host_uid, status FROM rooms WHERE id = ${code}`;
+    const rooms = await sql`SELECT host_uid, status, max_players FROM rooms WHERE id = ${code}`;
     if (rooms.length === 0) return json(404, { error: "room not found" });
     if (rooms[0].host_uid !== user.uid) return json(403, { error: "only the host can start" });
     if (rooms[0].status !== "lobby") return json(409, { error: "already started" });
 
     const seats = await sql`SELECT seat_index FROM room_seats WHERE room_id = ${code}`;
+    const max = Number(rooms[0].max_players || 4);
     if (seats.length < 2) return json(400, { error: "need at least 2 players" });
+    if (seats.length < max) {
+      return json(409, { error: `Waiting for ${max - seats.length} more player${max - seats.length === 1 ? "" : "s"} before starting.` });
+    }
 
     const currentSeat = Number.isInteger(state.currentPlayerIndex) ? state.currentPlayerIndex : 0;
     await sql`UPDATE games SET seq = 1, current_seat = ${currentSeat}, status = 'playing',

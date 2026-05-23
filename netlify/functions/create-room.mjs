@@ -1,7 +1,10 @@
 // Create a room. The caller becomes the host at seat 0. The game starts in
 // "lobby" status with no dealt state yet (see start-game).
 
-import { db, getUser, json, parseBody, hashPassword, makeRoomCode } from "./_lib.mjs";
+import {
+  db, getUser, json, parseBody, hashPassword, makeRoomCode,
+  countActiveRoomsForUser, MAX_ACTIVE_ROOMS_PER_USER,
+} from "./_lib.mjs";
 
 export const handler = async (event, context) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
@@ -18,6 +21,16 @@ export const handler = async (event, context) => {
 
   const sql = db();
   try {
+    // Per-user table cap. Returning 409 with a typed code lets the client
+    // show "archive an old game" rather than a generic error toast.
+    const activeCount = await countActiveRoomsForUser(sql, user.uid);
+    if (activeCount >= MAX_ACTIVE_ROOMS_PER_USER) {
+      return json(409, {
+        error: `You already have ${activeCount} open tables — archive one before starting a new game.`,
+        code: "table-cap",
+        cap: MAX_ACTIVE_ROOMS_PER_USER,
+      });
+    }
     // Find a free code (retry a few times on the astronomically rare clash).
     let code = null;
     for (let attempt = 0; attempt < 6; attempt++) {

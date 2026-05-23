@@ -91,33 +91,49 @@ export function submitIntermediate(roomId, payload) {
   return api("submit-turn", { method: "POST", body: { roomId, intermediate: true, ...payload } });
 }
 export function leaveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId } }); }
+export function archiveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId, archive: true } }); }
+export function endGame(roomId) { return api("end-game", { method: "POST", body: { roomId } }); }
 
 // ---- Polling (single in-flight, self-rescheduling) ----
 let pollTimer = null;
 let polling = false;
 let inFlight = false;
+let pollingRoomId = null;
+// Bumped on every (re)start so a previous loop's in-flight response can't
+// fire onUpdate after we've swapped to a new session/room.
+let pollGen = 0;
 
 // `waitFn()` is consulted per-tick. When it returns true the request asks the
 // server to long-poll (hold the connection until a new seq lands or ~9s
 // elapses). In long-poll mode the inter-tick interval drops to 200ms — the
 // server-side wait is what paces requests, not a client-side timer.
-export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500, waitFn = null } = {}) {
+export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500, waitFn = null, onError = null } = {}) {
   stopPolling();
   polling = true;
+  pollingRoomId = roomId;
+  const gen = ++pollGen;
+  const alive = () => polling && gen === pollGen;
   const schedule = () => {
-    if (!polling) return;
+    if (!alive()) return;
     const useWait = !!(waitFn && waitFn());
     pollTimer = setTimeout(tick, useWait ? 200 : intervalMs);
   };
   const tick = async () => {
-    if (!polling || inFlight) { schedule(); return; }
+    if (!alive()) return;
+    if (inFlight) { schedule(); return; }
     inFlight = true;
     try {
       const useWait = !!(waitFn && waitFn());
       const data = await getRoom(roomId, sinceFn(), useWait);
-      if (polling && onUpdate) await onUpdate(data);
-    } catch (_e) {
-      // Keep polling through transient errors; the next tick may recover.
+      if (alive() && onUpdate) await onUpdate(data);
+    } catch (e) {
+      // Transient errors are swallowed and retried on the next tick. A 404
+      // means the room was deleted (host ended it, archived to oblivion); let
+      // the caller decide whether to keep polling. Everything else falls
+      // through to the standard retry path.
+      if (alive() && onError) {
+        try { await onError(e); } catch (_) {}
+      }
     } finally {
       inFlight = false;
       schedule();
@@ -127,4 +143,5 @@ export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500, wai
 }
 
 export function isPolling() { return polling; }
-export function stopPolling() { polling = false; clearTimeout(pollTimer); pollTimer = null; }
+export function pollingFor() { return polling ? pollingRoomId : null; }
+export function stopPolling() { polling = false; pollingRoomId = null; clearTimeout(pollTimer); pollTimer = null; }

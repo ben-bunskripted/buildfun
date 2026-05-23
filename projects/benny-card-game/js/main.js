@@ -1435,7 +1435,48 @@ const MENU_ACTIONS = {
     syncFanToggleLabel();
     if (typeof layoutHand === "function") layoutHand();
   },
+  "archive-online": confirmArchiveCurrent,
+  "end-online": confirmEndCurrent,
 };
+
+// Non-host (and host pre-game, if they like) — archive their seat. Decrements
+// max_players on the server; if the room drops below 2 seats it's deleted.
+function confirmArchiveCurrent() {
+  if (!online.isInSession()) return;
+  showConfirm({
+    title: "Archive this game?",
+    body: "You'll leave this table for good and it will disappear from your list. The other players keep their seats.",
+    confirmLabel: "Archive",
+    onConfirm: async () => {
+      try { await online.archive(); } catch (_) {}
+      state = null;
+      ui.selectedIds.clear();
+      goToStartConfigStep("online");
+      showScreen("screen-start");
+      loadResumableRooms();
+      toast("Game archived.");
+    },
+  });
+}
+
+// Host only — end the game for everyone (hard-deletes the room server-side).
+function confirmEndCurrent() {
+  if (!online.isInSession() || !online.isHost()) return;
+  showConfirm({
+    title: "End this game?",
+    body: "Everyone at the table will be dropped and the game will disappear from their list. This can't be undone.",
+    confirmLabel: "End game",
+    onConfirm: async () => {
+      try { await online.endGame(); } catch (e) { toast((e && e.message) || "Couldn't end the game."); return; }
+      state = null;
+      ui.selectedIds.clear();
+      goToStartConfigStep("online");
+      showScreen("screen-start");
+      loadResumableRooms();
+      toast("Game ended.");
+    },
+  });
+}
 function closeAllTopBarMenus() {
   document.querySelectorAll(".top-bar-menu-list").forEach(list => {
     list.classList.add("hidden");
@@ -1453,6 +1494,7 @@ function wireTopBarMenu(btnId, listId) {
     const wasOpen = !list.classList.contains("hidden");
     closeAllTopBarMenus();
     if (!wasOpen) {
+      syncOnlineMenuVisibility(list);
       list.classList.remove("hidden");
       btn.setAttribute("aria-expanded", "true");
     }
@@ -1464,6 +1506,19 @@ function wireTopBarMenu(btnId, listId) {
     closeAllTopBarMenus();
     if (action) action();
   });
+}
+
+// "End game" and "Archive & leave" only make sense inside an online session.
+// "End game" is host-only. Toggled every time a menu opens so a state change
+// (e.g. host left the table) reflects immediately on the next open.
+function syncOnlineMenuVisibility(list) {
+  const inSession = online.isInSession();
+  const isHost = online.isHost();
+  list.querySelectorAll(".online-only").forEach(el => {
+    el.classList.toggle("hidden", !inSession);
+  });
+  const endBtn = list.querySelector("[data-action='end-online']");
+  if (endBtn) endBtn.classList.toggle("hidden", !(inSession && isHost));
 }
 document.addEventListener("click", (e) => {
   // Card size segs (start screen + both hamburger menus) all route through
@@ -2675,6 +2730,7 @@ function selectMostRecentSavedMode() {
 
 // ---------- Online multiplayer ----------
 let onlineVisibility = "public";
+let onlineMaxPlayers = 4;
 
 // Hand main.js's state + renderers to the online controller. online.js never
 // imports these directly because `state` and the DOM helpers are module-private.
@@ -2692,6 +2748,7 @@ function initOnline() {
     beginSpectatorLock: () => document.body.classList.add("cpu-animating"),
     endSpectatorLock: () => document.body.classList.remove("cpu-animating"),
     onRoster: renderLobbyRoster,
+    onRoomGone: handleOnlineRoomGone,
   });
 
   net.initIdentity().then(() => refreshOnlineModeBlock());
@@ -2724,6 +2781,18 @@ function buildOnlineUI() {
     onlineVisibility = btn.dataset.vis;
     $("online-password-field").classList.toggle("hidden", onlineVisibility !== "private");
   });
+
+  const maxSeg = $("online-max-players");
+  if (maxSeg) {
+    maxSeg.addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn");
+      if (!btn) return;
+      maxSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const n = Number(btn.dataset.max);
+      onlineMaxPlayers = (n >= 2 && n <= 4) ? n : 4;
+    });
+  }
 
   $("online-create-btn").addEventListener("click", onlineCreate);
   $("online-join-btn").addEventListener("click", onlineJoin);
@@ -2805,6 +2874,11 @@ function refreshOnlineModeBlock() {
 // no active tables. Clicking Rejoin runs the normal joinRoom path — the server
 // is idempotent for an already-seated user, so this puts them back where they
 // left off (lobby or live game).
+//
+// Each row is swipeable: dragging left reveals an Archive / End button on the
+// trailing edge. Hosts get "End" (deletes the room for everyone); non-hosts
+// (and pre-game hosts who just want to walk away) get "Archive" (drops just
+// their seat). Both actions go through showConfirm before hitting the server.
 async function loadResumableRooms() {
   const section = $("online-resume-section");
   const host = $("online-resume-list");
@@ -2816,24 +2890,148 @@ async function loadResumableRooms() {
     section.classList.remove("hidden");
     host.innerHTML = "";
     for (const r of rooms) {
-      const row = document.createElement("div");
-      row.className = "online-room-row";
-      const info = document.createElement("div");
-      info.className = "online-room-info";
-      const statusLabel = r.status === "playing" ? "in progress" : "in lobby";
-      info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
-      row.appendChild(info);
-      const btn = document.createElement("button");
-      btn.className = "pill primary";
-      btn.textContent = "Rejoin";
-      btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
-      row.appendChild(btn);
-      host.appendChild(row);
+      host.appendChild(buildResumableRow(r));
     }
   } catch (_) {
     // Silent failure — the user can still join via code if they remember it.
     section.classList.add("hidden");
   }
+}
+
+function buildResumableRow(r) {
+  const wrap = document.createElement("div");
+  wrap.className = "online-room-row-wrap";
+
+  // Trailing action panel — revealed by the swipe. Two buttons so the host
+  // can either end the whole game (destructive) or just step away.
+  const actions = document.createElement("div");
+  actions.className = "online-room-actions";
+  const archiveBtn = document.createElement("button");
+  archiveBtn.className = "row-action archive";
+  archiveBtn.textContent = "Archive";
+  archiveBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmArchiveRow(r, wrap); });
+  actions.appendChild(archiveBtn);
+  if (r.isHost) {
+    const endBtn = document.createElement("button");
+    endBtn.className = "row-action end";
+    endBtn.textContent = "End";
+    endBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmEndRow(r, wrap); });
+    actions.appendChild(endBtn);
+  }
+  wrap.appendChild(actions);
+
+  const row = document.createElement("div");
+  row.className = "online-room-row";
+  const info = document.createElement("div");
+  info.className = "online-room-info";
+  const statusLabel = r.status === "playing" ? "in progress" : "in lobby";
+  info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
+  row.appendChild(info);
+  const btn = document.createElement("button");
+  btn.className = "pill primary";
+  btn.textContent = "Rejoin";
+  btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
+  row.appendChild(btn);
+  wrap.appendChild(row);
+
+  attachRowSwipe(wrap, row, actions);
+  return wrap;
+}
+
+// Generic pointer-event swipe. Open state: the row is translated left by the
+// action panel's width, revealing it. Closing happens on outside tap, or on
+// any non-swipe interaction with the row (Rejoin click etc).
+function attachRowSwipe(wrap, row, actions) {
+  let startX = 0, startY = 0, dx = 0, active = false, gestured = false, locked = "none";
+  const ACTIVATION_PX = 6;
+
+  const setOffset = (px) => { row.style.transform = `translateX(${px}px)`; };
+  const close = () => { wrap.classList.remove("is-open"); setOffset(0); dx = 0; };
+  const open = () => {
+    // Close any other open rows first — only one panel revealed at a time.
+    document.querySelectorAll(".online-room-row-wrap.is-open").forEach(other => {
+      if (other !== wrap) {
+        other.classList.remove("is-open");
+        const inner = other.querySelector(".online-room-row");
+        if (inner) inner.style.transform = "translateX(0)";
+      }
+    });
+    wrap.classList.add("is-open");
+    setOffset(-actionsWidth());
+  };
+  const actionsWidth = () => actions.getBoundingClientRect().width || 96;
+
+  row.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return;       // let buttons do their own thing
+    startX = e.clientX; startY = e.clientY;
+    active = true; gestured = false; locked = "none";
+    row.style.transition = "none";
+  });
+  row.addEventListener("pointermove", (e) => {
+    if (!active) return;
+    const ddx = e.clientX - startX;
+    const ddy = e.clientY - startY;
+    if (locked === "none") {
+      if (Math.abs(ddx) < ACTIVATION_PX && Math.abs(ddy) < ACTIVATION_PX) return;
+      // Horizontal-dominant wins the gesture; vertical bails so the parent
+      // scroll container keeps the y-axis.
+      locked = Math.abs(ddx) > Math.abs(ddy) ? "x" : "y";
+      if (locked === "y") { active = false; return; }
+      try { row.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+    gestured = true;
+    e.preventDefault();
+    const base = wrap.classList.contains("is-open") ? -actionsWidth() : 0;
+    dx = Math.min(0, Math.max(-actionsWidth() - 30, base + ddx));
+    setOffset(dx);
+  });
+  const finish = () => {
+    if (!active) { row.style.transition = ""; return; }
+    active = false;
+    row.style.transition = "";
+    if (locked !== "x" || !gestured) return;
+    if (dx <= -actionsWidth() / 2) open();
+    else close();
+  };
+  row.addEventListener("pointerup", finish);
+  row.addEventListener("pointercancel", finish);
+}
+
+document.addEventListener("click", (e) => {
+  // Any click outside an open row collapses it.
+  const open = document.querySelectorAll(".online-room-row-wrap.is-open");
+  if (!open.length) return;
+  open.forEach(wrap => {
+    if (!wrap.contains(e.target)) {
+      const inner = wrap.querySelector(".online-room-row");
+      if (inner) inner.style.transform = "translateX(0)";
+      wrap.classList.remove("is-open");
+    }
+  });
+});
+
+function confirmArchiveRow(r, wrap) {
+  showConfirm({
+    title: "Archive this game?",
+    body: `Drop your seat at "${r.name}". The game will disappear from your list; remaining players can keep going with one fewer seat.`,
+    confirmLabel: "Archive",
+    onConfirm: async () => {
+      try { await online.archive(r.roomId); } catch (e) { toast((e && e.message) || "Couldn't archive."); }
+      loadResumableRooms();
+    },
+  });
+}
+
+function confirmEndRow(r, wrap) {
+  showConfirm({
+    title: "End this game?",
+    body: `Close "${r.name}" for everyone. The game will be deleted and disappear from every player's list. This can't be undone.`,
+    confirmLabel: "End game",
+    onConfirm: async () => {
+      try { await online.endGame(r.roomId); } catch (e) { toast((e && e.message) || "Couldn't end the game."); }
+      loadResumableRooms();
+    },
+  });
 }
 
 async function loadOnlineRoomList() {
@@ -2877,7 +3075,7 @@ async function onlineCreate() {
     visibility: onlineVisibility,
     password: $("online-room-password").value,
     displayName: onlineDisplayName(),
-    maxPlayers: 4,
+    maxPlayers: onlineMaxPlayers,
   };
   if (opts.visibility === "private" && !opts.password) { toast("Set a password for a private table."); return; }
   $("online-create-btn").disabled = true;
@@ -2885,10 +3083,36 @@ async function onlineCreate() {
     const res = await online.createRoom(opts);
     enterLobbyScreen(res);
   } catch (e) {
-    toast(e.message || "Couldn't create the table.");
+    if (e && e.data && e.data.code === "table-cap") promptForArchiveOldRoom(e.data);
+    else toast((e && e.message) || "Couldn't create the table.");
   } finally {
     $("online-create-btn").disabled = false;
   }
+}
+
+// The poll loop reports the room was deleted out from under us (host ended
+// it, or it was archived to oblivion). Drop any in-memory match state and
+// bounce back to the start screen with a toast.
+function handleOnlineRoomGone() {
+  state = null;
+  ui.selectedIds.clear();
+  toast("This table has been closed.");
+  goToStartConfigStep("online");
+  showScreen("screen-start");
+  loadResumableRooms();
+}
+
+// Server says the user is at the per-account table cap. Surface a confirm
+// modal that nudges them to the "Your tables" list — no auto-archive (we
+// don't know which one they want to drop).
+function promptForArchiveOldRoom(data) {
+  const cap = (data && data.cap) || 10;
+  showConfirm({
+    title: "Table limit reached",
+    body: `You can have up to ${cap} open tables at once. Swipe a game in "Your tables" to archive it, then try again.`,
+    confirmLabel: "OK",
+    onConfirm: () => { loadResumableRooms(); },
+  });
 }
 
 function onlineJoin() {
@@ -2900,23 +3124,29 @@ function onlineJoin() {
 async function joinOnlineRoom(code, password) {
   try {
     const res = await online.joinRoom(code, password, onlineDisplayName());
+    if (online.isActive()) {
+      // Rejoined an in-progress game and the server returned live state, so
+      // online.route() has already swapped to the play screen. Nothing to do.
+      return;
+    }
     if (res.status === "lobby") {
       enterLobbyScreen(res);
     } else {
-      // Game already in progress — show the lobby shell; the poll will adopt
-      // the live state and route into the play screen momentarily.
+      // Server didn't include state (older deploy, finished game, etc.) —
+      // fall back to showing the lobby shell while the next poll catches up.
       showScreen("screen-online-lobby");
       $("lobby-status").textContent = "Joining game…";
     }
   } catch (e) {
-    toast(e.message || "Couldn't join that table.");
+    if (e && e.data && e.data.code === "table-cap") promptForArchiveOldRoom(e.data);
+    else toast((e && e.message) || "Couldn't join that table.");
   }
 }
 
 function enterLobbyScreen(res) {
   $("lobby-room-name").textContent = res.name || "Benny";
   $("lobby-room-code").textContent = res.roomId;
-  renderLobbyRoster(res.players, { status: "lobby" });
+  renderLobbyRoster(res.players, { status: "lobby", maxPlayers: res.maxPlayers });
   showScreen("screen-online-lobby");
 }
 
@@ -2926,6 +3156,7 @@ function renderLobbyRoster(players, server) {
   if (!list) return;
   list.innerHTML = "";
   const ordered = [...(players || [])].sort((a, b) => a.seat - b.seat);
+  const max = Number((server && server.maxPlayers) || online.maxPlayers()) || ordered.length;
   for (const p of ordered) {
     const row = document.createElement("div");
     row.className = "lobby-player" + (p.connected ? "" : " is-disconnected");
@@ -2935,16 +3166,33 @@ function renderLobbyRoster(players, server) {
     row.innerHTML = `<span>${escapeHTML(p.name)}</span>${tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : ""}`;
     list.appendChild(row);
   }
+  // Empty placeholder slots show the host how many more players are needed.
+  const empties = Math.max(0, max - ordered.length);
+  for (let i = 0; i < empties; i++) {
+    const row = document.createElement("div");
+    row.className = "lobby-player is-empty";
+    row.innerHTML = `<span class="muted">Waiting for player…</span>`;
+    list.appendChild(row);
+  }
   const startBtn = $("lobby-start-btn");
   if (startBtn) {
-    const canStart = online.isHost() && ordered.length >= 2 && (!server || server.status === "lobby");
+    // Host can only start once the table is full — that's the player count
+    // they committed to at create time.
+    const canStart = online.isHost() && ordered.length === max && max >= 2 && (!server || server.status === "lobby");
     startBtn.classList.toggle("hidden", !canStart);
   }
   const statusEl = $("lobby-status");
   if (statusEl && (!server || server.status === "lobby")) {
-    statusEl.textContent = online.isHost()
-      ? (ordered.length >= 2 ? "Ready when you are — start the game." : "Waiting for at least one more player…")
-      : "Waiting for the host to start…";
+    const remaining = max - ordered.length;
+    if (online.isHost()) {
+      statusEl.textContent = remaining > 0
+        ? `Waiting for ${remaining} more player${remaining === 1 ? "" : "s"}…`
+        : "Ready when you are — start the game.";
+    } else {
+      statusEl.textContent = remaining > 0
+        ? `Waiting for ${remaining} more player${remaining === 1 ? "" : "s"} before the host can start…`
+        : "Waiting for the host to start…";
+    }
   }
 }
 

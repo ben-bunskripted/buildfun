@@ -23,6 +23,7 @@ export function mySeat() { return session ? session.mySeat : -1; }
 export function isHost() { return !!session && session.isHost; }
 export function roomId() { return session ? session.roomId : null; }
 export function players() { return session ? session.players : []; }
+export function maxPlayers() { return session ? (session.maxPlayers || 0) : 0; }
 export function isMyTurn() {
   const st = cb && cb.getState();
   return isActive() && st && st.currentPlayerIndex === session.mySeat;
@@ -83,6 +84,11 @@ async function flushIntermediate() {
 
 // ---- Lobby ----
 export async function createRoom(opts) {
+  // Same safeguard as joinRoom — if a previous session left a poll loop alive
+  // (e.g. user navigated back to the start screen without leaving the lobby),
+  // its closure still points at the old roomId and would adopt that room's
+  // state into this fresh session.
+  net.stopPolling();
   const res = await net.createRoom(opts);
   enter(res, true);
   ensurePoll();
@@ -90,9 +96,21 @@ export async function createRoom(opts) {
 }
 
 export async function joinRoom(roomId, password, displayName) {
+  // A stale poll from a previous session would otherwise keep running against
+  // its old roomId and feed onPollUpdate the wrong game's state.
+  net.stopPolling();
   const res = await net.joinRoom(roomId, password, displayName);
   enter(res, res.isHost);
-  // If we joined a game already in progress, the next poll adopts + routes.
+  // Server hands back the live state on rejoin into an in-progress game so we
+  // can adopt + route immediately. Without this the first poll would ask the
+  // server for "anything newer than the current seq" and stall on a long-poll
+  // until another player acted — i.e. multi-second "Joining game…" hang.
+  if (res.state && res.status === "playing") {
+    session.started = true;
+    session.status = "playing";
+    adopt(res.state, res.seq || 0);
+    route();
+  }
   ensurePoll();
   return res;
 }
@@ -102,6 +120,7 @@ function enter(res, isHost) {
     roomId: res.roomId, name: res.name, mySeat: res.seat, isHost,
     players: res.players || [], lastSeq: res.seq || 0,
     status: res.status || "lobby", started: false, recording: null,
+    maxPlayers: Number(res.maxPlayers) || 0,
   };
 }
 
@@ -134,12 +153,35 @@ export async function startGame() {
 
 export async function leave() {
   const id = session && session.roomId;
+  tearDownSession();
+  if (id) { try { await net.leaveRoom(id); } catch (_) {} }
+}
+
+// Archive: the user is permanently dropping this table. Server removes their
+// seat, decrements max_players, and auto-deletes the room if it falls below
+// the minimum viable size. Returns the server response so callers can refresh
+// the "Your tables" list with the new state.
+export async function archive(targetRoomId) {
+  const id = targetRoomId || (session && session.roomId);
+  if (!id) return { ok: true };
+  if (session && session.roomId === id) tearDownSession();
+  return net.archiveRoom(id);
+}
+
+// Host-only: end the game for everyone. Server hard-deletes the room.
+export async function endGame(targetRoomId) {
+  const id = targetRoomId || (session && session.roomId);
+  if (!id) return { ok: true };
+  if (session && session.roomId === id) tearDownSession();
+  return net.endGame(id);
+}
+
+function tearDownSession() {
   net.stopPolling();
   if (intermediateTimer) { clearTimeout(intermediateTimer); intermediateTimer = null; }
   intermediateInFlight = false;
   session = null;
   replaying = false;
-  if (id) { try { await net.leaveRoom(id); } catch (_) {} }
 }
 
 // ---- Turn commit ----
@@ -244,14 +286,32 @@ function adopt(serializedState, seq) {
 
 // ---- Polling ----
 function ensurePoll() {
-  if (!session || net.isPolling()) return;
+  if (!session) return;
+  // If a poll loop is already running, it might be for a *previous* roomId
+  // (captured in startPolling's closure). Keep it only if it matches the
+  // current session — otherwise tear it down so the new room takes over.
+  if (net.isPolling()) {
+    if (net.pollingFor() === session.roomId) return;
+    net.stopPolling();
+  }
   // Long-poll only once the match is actually in progress. In the lobby the
   // games.seq doesn't bump when players join/leave seats, so we need to keep
   // short-polling to pick up roster changes. As soon as status flips to
   // "playing", subsequent ticks request `wait=1` and the server holds the
   // connection until a new seq lands (or ~9s elapses).
   const waitFn = () => session && session.status === "playing";
-  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs: 1500, waitFn });
+  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs: 1500, waitFn, onError: onPollError });
+}
+
+// Called when a poll request rejects. A 404 means the room was deleted while
+// we were in it (host ended the game, room was auto-pruned). Tell the host
+// callback so the UI can bail out to the start screen.
+function onPollError(err) {
+  if (!session) return;
+  if (err && err.status === 404) {
+    tearDownSession();
+    cb && cb.onRoomGone && cb.onRoomGone();
+  }
 }
 
 async function onPollUpdate(server) {
