@@ -576,13 +576,23 @@ function startScoringMatch() {
   for (let i = 0; i < ui.scoring.numPlayers; i++) {
     names.push((ui.scoring.playerNames[i] || "").trim() || defaultName(i));
   }
-  const dealerIndex = ui.scoring.dealerChoice === "random"
+  const isRandom = ui.scoring.dealerChoice === "random";
+  const dealerIndex = isRandom
     ? randomInt(names.length)
     : Math.min(Number(ui.scoring.dealerChoice) || 0, names.length - 1);
   state = createScoringMatch(names, dealerIndex);
-  startScoringRound(state);
-  persist();
-  goScoringRoundScreen();
+  const begin = () => {
+    startScoringRound(state);
+    persist();
+    goScoringRoundScreen();
+  };
+  // Random dealer gets the same slot-machine reveal the play modes use.
+  if (isRandom) {
+    showScreen("screen-reveal");
+    runReveal(names, dealerIndex, begin);
+  } else {
+    begin();
+  }
 }
 
 // ---------- Tutorial entry ----------
