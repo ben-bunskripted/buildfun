@@ -202,7 +202,8 @@ function recordSetPlayed(state, set, kind) {
   const wildCount = set.cards.reduce((n, c) => n + (c.isWild ? 1 : 0), 0);
   state.matchEvents.setsPlayed.push({
     round: state.round,
-    playerIdx: set.ownerIndex,
+    playerIdx: set.ownerIndex,         // who opened the set
+    byIdx: state.currentPlayerIndex,   // who made this particular play (opener or adder)
     setId: set.id,
     type: set.type,
     rank: set.type === "number" ? set.rank : undefined,

@@ -42,19 +42,42 @@ function finalSetsFromEvents(summary) {
   return Array.from(lastBySetId.values());
 }
 
+// Like finalSetsFromEvents, but also collects every player who contributed to a
+// set (opener + anyone who added to it). Run-length feats credit all of them,
+// and a set's final length includes additions made by other players.
+// `byIdx` falls back to `playerIdx` for matches saved before it was logged.
+function finalSetsWithContributors(summary) {
+  if (!isCardDetailMode(summary)) return [];
+  const events = (summary.matchEvents && summary.matchEvents.setsPlayed) || [];
+  const map = new Map();
+  for (const e of events) {
+    let rec = map.get(e.setId);
+    if (!rec) { rec = { last: e, contributors: new Set() }; map.set(e.setId, rec); }
+    rec.last = e;
+    rec.contributors.add(e.byIdx != null ? e.byIdx : e.playerIdx);
+  }
+  return Array.from(map.values());
+}
+
 // Public: the same reduction, exposed so the profile updater can scan the
 // finalised match for suits, ranks, and longest-run feats per player.
 export function summariseSetsPerPlayer(summary) {
   const out = {};
   for (const player of summary.players) out[player.idx] = { runsBySuit: new Set(), quadsByRank: new Set(), longestRun: 0 };
-  for (const s of finalSetsFromEvents(summary)) {
-    const bucket = out[s.playerIdx];
-    if (!bucket) continue;
-    if (s.type === "run" && s.suit) {
-      bucket.runsBySuit.add(s.suit);
-      if (s.length > bucket.longestRun) bucket.longestRun = s.length;
-    } else if (s.type === "number" && s.length >= 4 && s.rank) {
-      bucket.quadsByRank.add(s.rank);
+  for (const { last, contributors } of finalSetsWithContributors(summary)) {
+    if (last.type === "run" && last.suit) {
+      // Suit credit goes to the player who opened the run.
+      const owner = out[last.playerIdx];
+      if (owner) owner.runsBySuit.add(last.suit);
+      // Run-length credit goes to everyone who built it — opener and adders —
+      // and the length already includes other players' additions.
+      for (const idx of contributors) {
+        const b = out[idx];
+        if (b && last.length > b.longestRun) b.longestRun = last.length;
+      }
+    } else if (last.type === "number" && last.length >= 4 && last.rank) {
+      const owner = out[last.playerIdx];
+      if (owner) owner.quadsByRank.add(last.rank);
     }
   }
   return out;
@@ -225,9 +248,10 @@ export const ACHIEVEMENTS = [
   },
   {
     id: "long_runner", name: "Long Runner", icon: "🏃", category: "card", modes: PLAY_MODES,
-    description: "Lay down a run of 5 or more in a single match.",
+    description: "Help build a run of 5 or more in a single match.",
     evaluate: ({ player, summary }) =>
-      finalSetsFromEvents(summary).some(s => s.playerIdx === player.idx && s.type === "run" && s.length >= 5),
+      finalSetsWithContributors(summary).some(({ last, contributors }) =>
+        last.type === "run" && last.length >= 5 && contributors.has(player.idx)),
   },
   {
     id: "quad_squad", name: "Quad Squad", icon: "🃏", category: "card", modes: PLAY_MODES,
