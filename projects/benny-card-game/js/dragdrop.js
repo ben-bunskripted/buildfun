@@ -94,7 +94,6 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       ctx.rect = { left, top, width: w, height: h };
       ctx.offsetX = startX - left;
       ctx.offsetY = startY - top;
-      try { card.setPointerCapture(ctx.pointerId); } catch (_) {}
 
       // Build placeholder occupying the original slot. We clone the card so
       // the slot stays visible as a faded ghost — easier to see where you
@@ -120,6 +119,10 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       card.style.top = top + "px";
       card.style.width = w + "px";
       card.classList.add("dragging");
+      // Capture the pointer AFTER reparenting — some browsers drop capture
+      // when the captured element is moved between parents, so claim it
+      // once the card has reached its final position in <body>.
+      try { card.setPointerCapture(ctx.pointerId); } catch (_) {}
       ctx.moveSuppressedClick = true;
 
       // While dragging, suppress the browser's native long-press behaviors —
