@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "benny-v38";
+const CACHE = "benny-v39";
 
 const CARD_NAMES = [
   "1B","1J","2B","2J","2C","2D","2H","2S","3C","3D","3H","3S",
@@ -26,6 +26,8 @@ const SHELL = [
   "./js/profiles.js",
   "./js/achievements.js",
   "./js/tutorial.js",
+  "./js/net.js",
+  "./js/online.js",
   "./assets/favicon.png",
   "./assets/logo-bg.png",
   "./assets/icon-192-v3.png",
@@ -64,6 +66,9 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return; // Let POSTs (e.g. Netlify feedback) pass through.
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // Online-multiplayer API calls must always hit the network — never serve a
+  // cached (stale) poll response, or the game would freeze on old state.
+  if (url.pathname.startsWith("/.netlify/functions/") || url.pathname.startsWith("/api/")) return;
 
   event.respondWith((async () => {
     const cached = await caches.match(req);

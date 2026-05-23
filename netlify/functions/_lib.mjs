@@ -1,0 +1,70 @@
+// Shared helpers for the Benny online-multiplayer functions.
+//
+// Files prefixed with "_" are treated as helper modules by Netlify, not
+// deployed as their own endpoints.
+
+import { neon } from "@neondatabase/serverless";
+
+let _sql = null;
+// Lazily create the Neon client so importing this module never throws when the
+// DB env var is missing (e.g. during local static-only development).
+export function db() {
+  if (_sql) return _sql;
+  const url = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
+  if (!url) throw new Error("NETLIFY_DATABASE_URL is not set — enable Netlify DB on this site.");
+  _sql = neon(url);
+  return _sql;
+}
+
+// Netlify Identity populates context.clientContext.user from a valid
+// `Authorization: Bearer <jwt>` header. Returns a normalized user or null.
+export function getUser(context) {
+  const u = context && context.clientContext && context.clientContext.user;
+  if (!u || !u.sub) return null;
+  const meta = u.user_metadata || {};
+  return {
+    uid: u.sub,
+    email: u.email || "",
+    name: (meta.full_name || meta.name || u.email || "Player").toString().slice(0, 40),
+  };
+}
+
+export function json(statusCode, body) {
+  return {
+    statusCode,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    body: JSON.stringify(body),
+  };
+}
+
+export function parseBody(event) {
+  try { return JSON.parse(event.body || "{}"); } catch (_) { return {}; }
+}
+
+// ---- Password hashing (Web Crypto; no native deps) ----
+function toHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+export async function hashPassword(pw, saltHex) {
+  const salt = saltHex || toHex(crypto.getRandomValues(new Uint8Array(16)));
+  const data = new TextEncoder().encode(`${salt}:${pw}`);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return `${salt}$${toHex(digest)}`;
+}
+export async function verifyPassword(pw, stored) {
+  if (!stored) return false;
+  const [salt] = String(stored).split("$");
+  if (!salt) return false;
+  const recomputed = await hashPassword(pw, salt);
+  return recomputed === stored;
+}
+
+// ---- Room join codes ----
+// Unambiguous alphabet (no 0/O/1/I).
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export function makeRoomCode(len = 5) {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  let out = "";
+  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
+}

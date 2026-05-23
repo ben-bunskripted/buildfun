@@ -10,6 +10,10 @@
 <link rel="apple-touch-icon" href="assets/icon-192-v3.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="css/styles.css" />
+<!-- Netlify Identity widget — provides Google/email sign-in for Online mode.
+     Loaded as a classic script so window.netlifyIdentity exists before the
+     deferred main.js module boots. Fails gracefully when offline. -->
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 </head>
 <body>
 <div id="app">
@@ -44,6 +48,7 @@
           <button type="button" class="seg-btn active" data-mode="multiplayer">Multiplayer</button>
           <button type="button" class="seg-btn" data-mode="cpu">Solo vs CPU</button>
           <button type="button" class="seg-btn" data-mode="scoring">Scoring only</button>
+          <button type="button" class="seg-btn" data-mode="online">Online</button>
         </div>
       </label>
 
@@ -110,6 +115,63 @@
         </label>
       </div>
 
+      <!-- Online config -->
+      <div class="mode-block hidden" id="mode-online">
+        <p class="muted small-help">Play a live game over the internet. Sign in, then create a table or join a friend with their code.</p>
+
+        <div id="online-signed-out">
+          <button type="button" id="online-signin-btn" class="pill primary">Sign in to play online</button>
+          <p id="online-unavailable" class="muted small-help hidden">Online play isn't available right now — check your connection.</p>
+        </div>
+
+        <div id="online-signed-in" class="hidden">
+          <p class="muted small-help online-whoami">Signed in as <strong id="online-user-name"></strong> · <button type="button" id="online-signout-btn" class="text-link">Sign out</button></p>
+
+          <label class="field">
+            <span class="field-label">Display name</span>
+            <input type="text" class="name-input" id="online-display-name" maxlength="20" autocomplete="off" placeholder="Your name" />
+          </label>
+
+          <div class="online-section">
+            <label class="field">
+              <span class="field-label">Table name</span>
+              <input type="text" class="name-input" id="online-room-name" maxlength="40" autocomplete="off" placeholder="My game" />
+            </label>
+            <label class="field">
+              <span class="field-label">Visibility</span>
+              <div class="seg" id="online-visibility">
+                <button type="button" class="seg-btn active" data-vis="public">Public</button>
+                <button type="button" class="seg-btn" data-vis="private">Private</button>
+              </div>
+            </label>
+            <label class="field hidden" id="online-password-field">
+              <span class="field-label">Password</span>
+              <input type="text" class="name-input" id="online-room-password" maxlength="40" autocomplete="off" placeholder="Set a password" />
+            </label>
+            <button type="button" id="online-create-btn" class="pill primary big">Create table</button>
+          </div>
+
+          <div class="online-section">
+            <label class="field">
+              <span class="field-label">Join by code</span>
+              <div class="online-join-row">
+                <input type="text" class="name-input" id="online-join-code" maxlength="5" autocomplete="off" placeholder="CODE" />
+                <button type="button" id="online-join-btn" class="pill">Join</button>
+              </div>
+            </label>
+            <input type="text" class="name-input hidden" id="online-join-password" maxlength="40" autocomplete="off" placeholder="Password (for private tables)" />
+          </div>
+
+          <div class="online-section">
+            <div class="online-browse-head">
+              <span class="field-label">Public tables</span>
+              <button type="button" id="online-refresh-btn" class="text-link">Refresh</button>
+            </div>
+            <div id="online-room-list" class="online-room-list"></div>
+          </div>
+        </div>
+      </div>
+
       <label class="field" id="field-card-style">
         <span class="field-label">Card style</span>
         <div class="seg" id="card-style-seg">
@@ -148,6 +210,25 @@
       <!-- Safety net: always-visible tutorial link at the bottom of the panel,
            in case the user dismissed the prominent one near the Start button. -->
       <button type="button" id="tutorial-foot-btn" class="text-link tutorial-foot">Replay tutorial</button>
+    </div>
+  </section>
+
+  <!-- Online lobby screen -->
+  <section id="screen-online-lobby" class="screen">
+    <div class="card-panel start-panel">
+      <h1 class="title">Game lobby</h1>
+      <p class="muted">Table <strong id="lobby-room-name"></strong></p>
+      <div class="lobby-code-box">
+        <span class="field-label">Share this code</span>
+        <div class="lobby-code" id="lobby-room-code"></div>
+      </div>
+      <div class="lobby-players">
+        <span class="field-label">Players</span>
+        <div id="lobby-player-list" class="lobby-player-list"></div>
+      </div>
+      <p class="muted small-help" id="lobby-status">Waiting for the host to start…</p>
+      <button type="button" id="lobby-start-btn" class="pill primary big hidden">Start game</button>
+      <button type="button" id="lobby-leave-btn" class="pill ghost">Leave table</button>
     </div>
   </section>
 
