@@ -91,9 +91,14 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       ctx.offsetY = startY - top;
       try { card.setPointerCapture(ctx.pointerId); } catch (_) {}
 
-      // Build placeholder occupying the original slot.
-      const ph = document.createElement("div");
-      ph.className = "drag-placeholder card";
+      // Build placeholder occupying the original slot. We clone the card so
+      // the slot stays visible as a faded ghost — easier to see where you
+      // picked up from than a blank gap. Strip interactive/animated classes
+      // so the clone is purely visual.
+      const ph = card.cloneNode(true);
+      ph.classList.add("drag-placeholder");
+      ph.classList.remove("in-hand", "dragging", "selected", "just-drawn");
+      ph.removeAttribute("id");
       ph.style.width = w + "px";
       ph.style.height = h + "px";
       handEl.insertBefore(ph, card.nextSibling);
