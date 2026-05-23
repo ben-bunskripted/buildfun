@@ -1140,10 +1140,27 @@ function layoutHand() {
 
   const cardW = parseFloat(getComputedStyle(cards[0]).width) || 58;
 
+  // Available width is shared by both layouts — at L/XL sizes on narrow
+  // viewports, the fan's fixed 55% overlap can push the hand past the screen
+  // edge, so we tighten it to fit just like spread mode does.
+  const cs = getComputedStyle(hand);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const available = Math.max(0, hand.clientWidth - padX);
+
   if (ui.handFanned) {
     // Heavy overlap so cards stack like in a real hand. Show ~45% of each
-    // card's left edge.
-    const overlap = -Math.round(cardW * 0.55);
+    // card's left edge by default; tighten further if the row would overflow.
+    let overlap = -Math.round(cardW * 0.55);
+    if (n > 1 && available > 0) {
+      // Width with current overlap: cardW + (n-1)*(cardW + overlap).
+      const fannedWidth = cardW + (n - 1) * (cardW + overlap);
+      if (fannedWidth > available) {
+        const step = (available - cardW) / (n - 1);
+        // Keep at least 8% of each card visible so the fan stays legible.
+        const minStep = Math.max(1, Math.round(cardW * 0.08));
+        overlap = Math.max(step, minStep) - cardW;
+      }
+    }
     hand.style.setProperty("--hand-overlap", `${overlap}px`);
     // Per-card tilt. Cap the total spread so 8 cards don't look like an
     // explosion.
@@ -1157,9 +1174,6 @@ function layoutHand() {
   }
 
   // Spread mode — pack to width only if natural layout doesn't fit.
-  const cs = getComputedStyle(hand);
-  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-  const available = hand.clientWidth - padX;
   const naturalGap = 6;
   const naturalWidth = n * cardW + (n - 1) * naturalGap;
   if (n === 1 || naturalWidth <= available) {
