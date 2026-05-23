@@ -182,7 +182,13 @@ function adopt(serializedState, seq) {
 // ---- Polling ----
 function ensurePoll() {
   if (!session || net.isPolling()) return;
-  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs: 1500 });
+  // Long-poll only once the match is actually in progress. In the lobby the
+  // games.seq doesn't bump when players join/leave seats, so we need to keep
+  // short-polling to pick up roster changes. As soon as status flips to
+  // "playing", subsequent ticks request `wait=1` and the server holds the
+  // connection until a new seq lands (or ~9s elapses).
+  const waitFn = () => session && session.status === "playing";
+  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs: 1500, waitFn });
 }
 
 async function onPollUpdate(server) {

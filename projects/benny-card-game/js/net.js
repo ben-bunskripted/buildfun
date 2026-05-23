@@ -80,7 +80,11 @@ export function joinRoom(roomId, password, displayName) {
   return api("join-room", { method: "POST", body: { roomId, password, displayName } });
 }
 export function startGame(roomId, state) { return api("start-game", { method: "POST", body: { roomId, state } }); }
-export function getRoom(roomId, since) { return api("get-room", { query: { roomId, since: since || 0 } }); }
+export function getRoom(roomId, since, wait) {
+  const query = { roomId, since: since || 0 };
+  if (wait) query.wait = "1";
+  return api("get-room", { query });
+}
 export function submitTurn(roomId, payload) { return api("submit-turn", { method: "POST", body: { roomId, ...payload } }); }
 export function leaveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId } }); }
 
@@ -89,15 +93,24 @@ let pollTimer = null;
 let polling = false;
 let inFlight = false;
 
-export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500 } = {}) {
+// `waitFn()` is consulted per-tick. When it returns true the request asks the
+// server to long-poll (hold the connection until a new seq lands or ~9s
+// elapses). In long-poll mode the inter-tick interval drops to 200ms — the
+// server-side wait is what paces requests, not a client-side timer.
+export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500, waitFn = null } = {}) {
   stopPolling();
   polling = true;
-  const schedule = () => { if (polling) pollTimer = setTimeout(tick, intervalMs); };
+  const schedule = () => {
+    if (!polling) return;
+    const useWait = !!(waitFn && waitFn());
+    pollTimer = setTimeout(tick, useWait ? 200 : intervalMs);
+  };
   const tick = async () => {
     if (!polling || inFlight) { schedule(); return; }
     inFlight = true;
     try {
-      const data = await getRoom(roomId, sinceFn());
+      const useWait = !!(waitFn && waitFn());
+      const data = await getRoom(roomId, sinceFn(), useWait);
       if (polling && onUpdate) await onUpdate(data);
     } catch (_e) {
       // Keep polling through transient errors; the next tick may recover.

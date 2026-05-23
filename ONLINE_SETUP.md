@@ -101,9 +101,6 @@ the ~1.5s poll latency a non-issue, so there are no websockets to manage.
   are cheap later because `game.js`/`rules.js` are pure and importable in a
   function.
 - **Minimal disconnect handling:** if a player drops, their turn simply waits.
-- **No online profile stats yet:** online matches don't fold into the local
-  per-player achievement/stat store (each device would otherwise record every
-  opponent under its own local profiles).
 - **Host is the single authority** for advancing rounds and ending the match.
 
 ## Troubleshooting

@@ -63,8 +63,9 @@ let ui = {
   // breakpoint-driven default (no override); s/l/xl scale the --card-w/h vars.
   cardSize: "m",
   // When true, CPU turns play out as on-table card animations instead of the
-  // recap modal. Persisted as prefs.animateCpu.
-  animateCpu: false,
+  // recap modal. Persisted as prefs.animateCpu. New users default to on; saved
+  // prefs override.
+  animateCpu: true,
 };
 
 const CARD_SIZE_VALUES = new Set(["s", "m", "l", "xl"]);
@@ -108,6 +109,10 @@ function setCardSize(size) {
   }
   if (CARD_SIZE_VALUES.has(prefs.cardSize)) {
     ui.cardSize = prefs.cardSize;
+  } else if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(min-width: 900px) and (pointer: fine)").matches) {
+    // First-run default on desktop is XL; mobile keeps the breakpoint-driven "m".
+    // Not persisted — picking a size from the menu writes a real pref and pins it.
+    ui.cardSize = "xl";
   }
   if (typeof prefs.animateCpu === "boolean") {
     ui.animateCpu = prefs.animateCpu;
@@ -160,13 +165,23 @@ ui.solo.opponents.forEach((o, i) => { o.name = DEFAULT_NAMES[i + 1] || `CPU ${i 
 function defaultName(i) { return DEFAULT_NAMES[i] || `Player ${i+1}`; }
 
 function buildStart() {
-  // Mode picker
+  // Mode picker (hidden seg, still used by other code paths that call selectMode)
   const modeSeg = $("mode-seg");
-  modeSeg.addEventListener("click", (e) => {
+  if (modeSeg) modeSeg.addEventListener("click", (e) => {
     const btn = e.target.closest(".seg-btn");
     if (!btn) return;
     selectMode(btn.dataset.mode);
   });
+  // 4-box pick step → switch to config step for the chosen mode.
+  const pickStep = $("start-pick-step");
+  if (pickStep) pickStep.addEventListener("click", (e) => {
+    const tile = e.target.closest(".mode-tile");
+    if (!tile) return;
+    goToStartConfigStep(tile.dataset.pickMode);
+  });
+  // Back link returns to the 4-box pick step.
+  const backBtn = $("start-back-btn");
+  if (backBtn) backBtn.addEventListener("click", goToStartPickStep);
   showModeBlock();
 
   // Multiplayer block
@@ -386,6 +401,22 @@ function selectMode(mode) {
   });
   showModeBlock();
   renderResumeBanner();
+}
+
+// Two-step start screen: "pick" (4 mode tiles) vs "config" (existing form).
+// Resume flow lands directly on the config step for whichever mode has a save.
+function goToStartPickStep() {
+  const pick = $("start-pick-step");
+  const config = $("start-config-step");
+  if (pick) pick.classList.remove("hidden");
+  if (config) config.classList.add("hidden");
+}
+function goToStartConfigStep(mode) {
+  if (mode) selectMode(mode);
+  const pick = $("start-pick-step");
+  const config = $("start-config-step");
+  if (pick) pick.classList.add("hidden");
+  if (config) config.classList.remove("hidden");
 }
 
 function renderNameFields() {
@@ -651,10 +682,12 @@ function startTutorialMatch() {
       tutorial.endTutorial();
       // Tutorial state was never persisted (see `persist()` / `isTutorial`),
       // so dropping the in-memory state is enough — any prior real match
-      // snapshot on the start screen survives untouched.
+      // snapshot on the start screen survives untouched. Land back on the
+      // config step for the current ui.mode so the user resumes where they
+      // launched the tutorial from.
       state = null;
       ui.selectedIds.clear();
-      renderResumeBanner();
+      goToStartConfigStep(ui.mode);
       showScreen("screen-start");
     },
   });
@@ -1356,6 +1389,8 @@ function renderActions() {
   const inTutorial = tutorial.isTutorialActive();
   $("add-set-btn").disabled = !canAdd || inTutorial;
   $("swap-btn").disabled = !canSwap || inTutorial;
+  const canDiscard = state.phase === "canAct" && ui.selectedIds.size === 1;
+  $("discard-btn").disabled = !canDiscard;
 }
 
 function escapeHTML(s) {
@@ -1370,7 +1405,7 @@ function exitToStart() {
     online.leave();
     state = null;
     ui.selectedIds.clear();
-    selectMode("online");
+    goToStartConfigStep("online");
     showScreen("screen-start");
     return;
   }
@@ -1379,18 +1414,28 @@ function exitToStart() {
   // it doesn't linger on the start screen.
   tutorial.endTutorial();
   // Land the start screen on the mode we just left so its resume banner shows
-  // the match we just saved (selectMode also re-renders the banner).
+  // the match we just saved (goToStartConfigStep re-runs selectMode + banner).
   const leftMode = state && state.mode;
   state = null;
   ui.selectedIds.clear();
-  if (leftMode) selectMode(leftMode); else renderResumeBanner();
+  if (leftMode) goToStartConfigStep(leftMode); else { renderResumeBanner(); goToStartPickStep(); }
   showScreen("screen-start");
 }
 
 // Mobile top-bar hamburger. The trigger button and dropdown live inside the
 // top-bar; on screens >600px the trigger is hidden by CSS and the inline
 // ?/feedback/exit pills are shown instead.
-const MENU_ACTIONS = { rules: openRules, feedback: openFeedback, exit: exitToStart };
+const MENU_ACTIONS = {
+  rules: openRules,
+  feedback: openFeedback,
+  exit: exitToStart,
+  fan: () => {
+    ui.handFanned = !ui.handFanned;
+    savePrefs({ ...loadPrefs(), handFanned: ui.handFanned });
+    syncFanToggleLabel();
+    if (typeof layoutHand === "function") layoutHand();
+  },
+};
 function closeAllTopBarMenus() {
   document.querySelectorAll(".top-bar-menu-list").forEach(list => {
     list.classList.add("hidden");
@@ -1514,17 +1559,9 @@ function wireUp() {
     renderHand();
   });
 
-  // Fan toggle — heavy overlap + per-card tilt vs spread layout.
-  const fanBtn = $("fan-toggle-btn");
-  if (fanBtn) {
-    syncFanToggleLabel();
-    fanBtn.addEventListener("click", () => {
-      ui.handFanned = !ui.handFanned;
-      savePrefs({ ...loadPrefs(), handFanned: ui.handFanned });
-      syncFanToggleLabel();
-      layoutHand();
-    });
-  }
+  // Fan toggle lives in the play hamburger menu — wired via MENU_ACTIONS.fan.
+  // Sync the label here so it shows the persisted state on first paint.
+  syncFanToggleLabel();
 
   // Play set
   $("play-set-btn").addEventListener("click", () => {
@@ -1549,6 +1586,18 @@ function wireUp() {
 
   // Swap wild
   $("swap-btn").addEventListener("click", openSwapModal);
+
+  // Discard the selected card — same path as tapping the discard pile, but
+  // surfaced as a button in the hand actions row for discoverability.
+  $("discard-btn").addEventListener("click", () => {
+    if (state.phase !== "canAct" || ui.selectedIds.size !== 1) return;
+    const id = [...ui.selectedIds][0];
+    const r = discard(state, id);
+    if (!r.ok) { toast(r.reason); return; }
+    online.record({ type: "discard", cardId: id });
+    ui.selectedIds.clear();
+    afterDiscard(r);
+  });
 
   // Round end / match end buttons
   $("continue-btn").addEventListener("click", () => {
@@ -1576,7 +1625,7 @@ function wireUp() {
       online.leave();
       state = null;
       ui.selectedIds.clear();
-      selectMode("online");
+      goToStartConfigStep("online");
       showScreen("screen-start");
       return;
     }
@@ -1584,7 +1633,7 @@ function wireUp() {
     discardSave(finishedMode);
     state = null;
     ui.selectedIds.clear();
-    if (finishedMode) selectMode(finishedMode); else renderResumeBanner();
+    if (finishedMode) goToStartConfigStep(finishedMode); else { renderResumeBanner(); goToStartPickStep(); }
     showScreen("screen-start");
   });
 
@@ -1703,7 +1752,9 @@ function resolveDropTarget(clientX, clientY, cardEl) {
     if (el.closest && el.closest("#discard-pile")) {
       return { kind: "discard", el: document.getElementById("discard-pile"), data: { cardId: card.id } };
     }
-    // 2) Wildcard inside a meld → swap, only if natural is legal.
+    // 2) Wildcard inside a meld → swap (default). If the same card would
+    //    also be a legal *addition* to the set, return a combined target so
+    //    the drop handler can ask the player which they meant.
     const tableCard = el.closest && el.closest("#all-melds .meld .card");
     if (tableCard && tableCard.classList.contains("is-wild")) {
       const meld = tableCard.closest(".meld");
@@ -1714,6 +1765,10 @@ function resolveDropTarget(clientX, clientY, cardEl) {
       if (!set || !me.hasOpened) continue;
       const v = validateSwap(set, positionIndex, card, state.wildcardRank);
       if (v.ok) {
+        const va = validateAddition(set, [card], state.wildcardRank);
+        if (va.ok) {
+          return { kind: "swap-or-add", el: tableCard, data: { setId, positionIndex, naturalCardId: card.id, cardId: card.id, validation: va } };
+        }
         return { kind: "swap", el: tableCard, data: { setId, positionIndex, naturalCardId: card.id } };
       }
     }
@@ -1753,18 +1808,52 @@ function handleDropOnTarget(target, _cardEl) {
     return;
   }
   if (target.kind === "add") {
-    const set = state.table.find(s => s.id === target.data.setId);
-    if (!set) return;
-    const v = target.data.validation;
-    if (set.type === "number") {
-      finalizeAddition(set, v.arrangement);
-    } else if (v.arrangements && v.arrangements.length === 1) {
-      finalizeAddition(set, v.arrangements[0]);
-    } else if (v.arrangements && v.arrangements.length > 1) {
-      chooseAdditionArrangement(v.arrangements, set, chosen => finalizeAddition(set, chosen));
-    }
+    runAddDrop(target);
     return;
   }
+  if (target.kind === "swap-or-add") {
+    showSwapOrAddChoice({
+      onSwap: () => handleDropOnTarget({ kind: "swap", data: target.data }, _cardEl),
+      onAdd: () => runAddDrop(target),
+    });
+    return;
+  }
+}
+
+// Extracted so the swap-or-add modal's "Add" branch can reuse the same logic
+// the plain add-drop uses (number vs run arrangement handling).
+function runAddDrop(target) {
+  const set = state.table.find(s => s.id === target.data.setId);
+  if (!set) return;
+  const v = target.data.validation;
+  if (set.type === "number") {
+    finalizeAddition(set, v.arrangement);
+  } else if (v.arrangements && v.arrangements.length === 1) {
+    finalizeAddition(set, v.arrangements[0]);
+  } else if (v.arrangements && v.arrangements.length > 1) {
+    chooseAdditionArrangement(v.arrangements, set, chosen => finalizeAddition(set, chosen));
+  }
+}
+
+function showSwapOrAddChoice({ onSwap, onAdd }) {
+  const modal = $("modal-swap-or-add");
+  if (!modal) { onSwap(); return; } // missing markup → fall back to default
+  const swapBtn = $("modal-swap-or-add-swap");
+  const addBtn = $("modal-swap-or-add-add");
+  const cancelBtn = $("modal-swap-or-add-cancel");
+  const close = () => {
+    modal.classList.add("hidden");
+    swapBtn.removeEventListener("click", onSwapClick);
+    addBtn.removeEventListener("click", onAddClick);
+    cancelBtn.removeEventListener("click", onCancelClick);
+  };
+  const onSwapClick = () => { close(); onSwap(); };
+  const onAddClick = () => { close(); onAdd(); };
+  const onCancelClick = () => { close(); };
+  swapBtn.addEventListener("click", onSwapClick);
+  addBtn.addEventListener("click", onAddClick);
+  cancelBtn.addEventListener("click", onCancelClick);
+  modal.classList.remove("hidden");
 }
 
 function openAddToSetModal() {
@@ -2094,7 +2183,15 @@ function recordAndRenderRewards() {
   if (!state) return;
   const profiles = loadProfiles();
   const summary = buildMatchSummary(state);
-  const { newUnlocks, progressUnlocks, progressGains } = recordMatch(profiles, summary);
+  // Online matches: only fold the local user's stats into this device's
+  // profile store. Opponents are remote players whose stats live on their own
+  // devices — recording them here would double-count when each device runs
+  // this same code path. Tag the unlock with the local seat so the rewards
+  // block below shows only the local player's earnings.
+  const isOnline = online.isInSession();
+  const localSeat = isOnline ? online.mySeat() : null;
+  const recordOpts = isOnline && localSeat >= 0 ? { onlyPlayerIdx: localSeat } : {};
+  const { newUnlocks, progressUnlocks, progressGains } = recordMatch(profiles, summary, recordOpts);
   saveProfiles(profiles);
 
   // Union of every player who has anything new to celebrate.
@@ -2564,7 +2661,16 @@ function selectMostRecentSavedMode() {
     const snap = all[m];
     if (snap && (snap.savedAt || 0) > bestAt) { best = m; bestAt = snap.savedAt || 0; }
   }
-  selectMode(best || ui.mode);
+  if (best) {
+    // Resumable game exists — jump straight to its config step so the resume
+    // banner is the first thing the user sees.
+    goToStartConfigStep(best);
+  } else {
+    // No saves: land on the 4-box pick step. Still call selectMode so any
+    // code that reads `ui.mode` has a sane default (multiplayer).
+    selectMode(ui.mode);
+    goToStartPickStep();
+  }
 }
 
 // ---------- Online multiplayer ----------
@@ -2632,9 +2738,41 @@ function buildOnlineUI() {
     online.leave();
     state = null;
     ui.selectedIds.clear();
-    selectMode("online");
+    goToStartConfigStep("online");
     showScreen("screen-start");
   });
+  const shareBtn = $("lobby-share-btn");
+  if (shareBtn) shareBtn.addEventListener("click", shareLobbyCode);
+}
+
+// Build a sharable join link + message for the current lobby. Web Share API on
+// mobile (and modern desktop), clipboard fallback elsewhere — either way the
+// recipient can tap the URL and land on the Online tab with the code pre-filled.
+async function shareLobbyCode() {
+  const code = ($("lobby-room-code") || {}).textContent || "";
+  if (!code) { toast("No table code to share yet."); return; }
+  const url = new URL(window.location.href);
+  url.searchParams.set("join", code);
+  // Strip the hash/screen-state so the link doesn't carry stale UI state.
+  url.hash = "";
+  const shareUrl = url.toString();
+  const message = `Join my Benny game! Code ${code}: ${shareUrl}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "Benny", text: `Join my Benny game! Code: ${code}`, url: shareUrl });
+      return;
+    }
+  } catch (e) {
+    // User dismissed the share sheet — fall through to clipboard copy.
+    if (e && e.name === "AbortError") return;
+  }
+  try {
+    await navigator.clipboard.writeText(message);
+    toast("Link copied — paste it to your friends.");
+  } catch (_) {
+    // Last-resort fallback: a prompt() so the user can copy manually.
+    window.prompt("Copy this link:", message);
+  }
 }
 
 // Reflect Identity auth state in the online mode block and refresh the table list.
@@ -2788,5 +2926,29 @@ function boot() {
   });
   showScreen("screen-start");
   showWelcomeModalIfNeeded();
+  applyJoinDeepLink();
+}
+
+// Consume ?join=CODE on first load — drops the user on the Online tab with
+// the join code pre-filled. Doesn't auto-join (they may need to sign in or
+// pick a display name first). The param is stripped from the URL so a refresh
+// doesn't re-trigger the deep link.
+function applyJoinDeepLink() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = (params.get("join") || "").trim().toUpperCase();
+    if (!code) return;
+    goToStartConfigStep("online");
+    const input = $("online-join-code");
+    if (input) {
+      input.value = code;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    // Clean the URL so reloads don't re-apply the deep link.
+    params.delete("join");
+    const cleanQuery = params.toString();
+    const newUrl = window.location.pathname + (cleanQuery ? "?" + cleanQuery : "") + window.location.hash;
+    window.history.replaceState({}, "", newUrl);
+  } catch (_) { /* URL parsing or history API unavailable — ignore */ }
 }
 document.addEventListener("DOMContentLoaded", boot);
