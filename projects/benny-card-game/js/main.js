@@ -2797,6 +2797,42 @@ function refreshOnlineModeBlock() {
     if (dn && !dn.value) dn.value = user.name || (loadPrefs().userName || "").trim() || "";
     if (!$("online-room-name").value) $("online-room-name").value = `${onlineDisplayName()}'s game`;
     loadOnlineRoomList();
+    loadResumableRooms();
+  }
+}
+
+// Populate the "Your tables" section from /my-rooms. Hidden when the user has
+// no active tables. Clicking Rejoin runs the normal joinRoom path — the server
+// is idempotent for an already-seated user, so this puts them back where they
+// left off (lobby or live game).
+async function loadResumableRooms() {
+  const section = $("online-resume-section");
+  const host = $("online-resume-list");
+  if (!section || !host) return;
+  try {
+    const res = await net.listMyRooms();
+    const rooms = (res && res.rooms) || [];
+    if (!rooms.length) { section.classList.add("hidden"); return; }
+    section.classList.remove("hidden");
+    host.innerHTML = "";
+    for (const r of rooms) {
+      const row = document.createElement("div");
+      row.className = "online-room-row";
+      const info = document.createElement("div");
+      info.className = "online-room-info";
+      const statusLabel = r.status === "playing" ? "in progress" : "in lobby";
+      info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
+      row.appendChild(info);
+      const btn = document.createElement("button");
+      btn.className = "pill primary";
+      btn.textContent = "Rejoin";
+      btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
+      row.appendChild(btn);
+      host.appendChild(row);
+    }
+  } catch (_) {
+    // Silent failure — the user can still join via code if they remember it.
+    section.classList.add("hidden");
   }
 }
 

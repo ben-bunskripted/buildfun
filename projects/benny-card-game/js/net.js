@@ -76,6 +76,7 @@ async function api(name, { method = "GET", body, query } = {}) {
 export function syncAuth(displayName) { return api("auth-sync", { method: "POST", body: { displayName } }); }
 export function createRoom(opts) { return api("create-room", { method: "POST", body: opts }); }
 export function listPublicRooms() { return api("list-rooms"); }
+export function listMyRooms() { return api("my-rooms"); }
 export function joinRoom(roomId, password, displayName) {
   return api("join-room", { method: "POST", body: { roomId, password, displayName } });
 }
@@ -86,6 +87,9 @@ export function getRoom(roomId, since, wait) {
   return api("get-room", { query });
 }
 export function submitTurn(roomId, payload) { return api("submit-turn", { method: "POST", body: { roomId, ...payload } }); }
+export function submitIntermediate(roomId, payload) {
+  return api("submit-turn", { method: "POST", body: { roomId, intermediate: true, ...payload } });
+}
 export function leaveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId } }); }
 
 // ---- Polling (single in-flight, self-rescheduling) ----

@@ -164,6 +164,15 @@
             <input type="text" class="name-input" id="online-display-name" maxlength="20" autocomplete="off" placeholder="Your name" />
           </label>
 
+          <!-- Resume tables: populated by my-rooms; only shown when the user
+               has at least one active table (lobby or in-progress). -->
+          <div class="online-section hidden" id="online-resume-section">
+            <div class="online-browse-head">
+              <span class="field-label">Your tables</span>
+            </div>
+            <div id="online-resume-list" class="online-room-list"></div>
+          </div>
+
           <div class="online-section">
             <label class="field">
               <span class="field-label">Table name</span>
