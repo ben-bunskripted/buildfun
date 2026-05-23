@@ -857,16 +857,15 @@ body.cpu-animating .hand .card {
   box-shadow: var(--shadow-lg);
   /* Reset the fan rotation/pivot while the card follows the pointer — it lives
      at position:fixed during the drag and shouldn't fan around the hand's
-     pivot point. The lifted card stays fully opaque so the user can see what
-     they're holding; the original slot picks up a faded ghost instead. */
+     pivot point. */
   transform-origin: 50% 50%;
   transform: translateY(-10px) scale(1.04);
   --card-rot: 0deg;
+  opacity: 0.5;
 }
 .card.drag-placeholder {
-  opacity: 0.3;
+  opacity: 0;
   pointer-events: none;
-  filter: saturate(0.6);
 }
 
 /* While a hand drag is in progress, suppress the browser's native selection
