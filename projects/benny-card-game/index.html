@@ -7,7 +7,7 @@
 <title>Benny</title>
 <meta name="description" content="Benny is a fast, tactical card game about building sets, using wildcards wisely, and getting rid of your hand before everyone else. Play through 14 rounds where the wildcard changes each time, keep your score low, and try to finish as the overall winner." />
 <link rel="icon" type="image/png" href="assets/favicon.png" />
-<link rel="apple-touch-icon" href="assets/icon-192.png" />
+<link rel="apple-touch-icon" href="assets/icon-192-v2.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -102,9 +102,13 @@
           </div>
         </label>
         <div id="scoring-name-fields" class="name-fields"></div>
+        <label class="field">
+          <span class="field-label">Dealer</span>
+          <select id="scoring-dealer-select" class="select"></select>
+        </label>
       </div>
 
-      <label class="field">
+      <label class="field" id="field-card-style">
         <span class="field-label">Card style</span>
         <div class="seg" id="card-style-seg">
           <button type="button" class="seg-btn active" data-style="modern">Modern</button>
@@ -112,7 +116,7 @@
         </div>
       </label>
 
-      <label class="field">
+      <label class="field" id="field-card-size">
         <span class="field-label">Card size</span>
         <div class="seg" id="card-size-seg">
           <button type="button" class="seg-btn" data-size="s">S</button>
@@ -122,7 +126,7 @@
         </div>
       </label>
 
-      <label class="field">
+      <label class="field" id="field-animate-cpu">
         <span class="field-label">Animate CPU moves</span>
         <div class="seg" id="animate-cpu-seg">
           <button type="button" class="seg-btn active" data-anim="off">Off</button>

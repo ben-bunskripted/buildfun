@@ -16,7 +16,7 @@ import {
   createScoringMatch, startScoringRound, submitScoringRound,
   isScoringMatchOver, advanceScoringRound, scoringWinnerIndex,
 } from "./scoring.js";
-import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot } from "./storage.js";
+import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot, loadAll as storageLoadAll, MATCH_MODES } from "./storage.js";
 import * as tutorial from "./tutorial.js";
 import { loadProfiles, saveProfiles, buildMatchSummary, recordMatch, listKnownPlayers, achievementById, keyFor as profileKeyFor } from "./profiles.js";
 import {
@@ -48,6 +48,7 @@ let ui = {
   scoring: {
     numPlayers: 3,
     playerNames: ["", "", "", ""],
+    dealerChoice: "0",
   },
   // Pending UI views for the CPU runner — held across the modal "Next" click.
   pendingAfterCpu: null,
@@ -122,7 +123,12 @@ function persist() {
   if (state.isTutorial) return;
   storageSave({ mode: state.mode, state: serialize(state), ui: { mode: ui.mode } });
 }
-function discardSave() { storageClear(); }
+// Clear a saved slot. Defaults to the active match's mode; pass an explicit
+// mode to clear a specific slot (e.g. the selected mode on the start screen).
+function discardSave(mode) {
+  const m = mode || (state && state.mode);
+  if (m) storageClear(m);
+}
 
 // ---------- DOM helpers ----------
 const $ = (id) => document.getElementById(id);
@@ -154,10 +160,7 @@ function buildStart() {
   modeSeg.addEventListener("click", (e) => {
     const btn = e.target.closest(".seg-btn");
     if (!btn) return;
-    modeSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    ui.mode = btn.dataset.mode;
-    showModeBlock();
+    selectMode(btn.dataset.mode);
   });
   showModeBlock();
 
@@ -204,8 +207,10 @@ function buildStart() {
     btn.classList.add("active");
     ui.scoring.numPlayers = Number(btn.dataset.count);
     renderScoringNames();
+    renderScoringDealer();
   });
   renderScoringNames();
+  renderScoringDealer();
 
   // Card style picker
   const cardSeg = $("card-style-seg");
@@ -340,6 +345,26 @@ function showModeBlock() {
   for (const m of ["multiplayer", "cpu", "scoring"]) {
     $(`mode-${m}`).classList.toggle("hidden", ui.mode !== m);
   }
+  // Per-mode settings visibility:
+  //  - Animate CPU moves only makes sense with a CPU opponent (Solo vs CPU).
+  //  - Scoring mode renders no cards, so card style/size are irrelevant.
+  const setShown = (id, shown) => $(id) && $(id).classList.toggle("hidden", !shown);
+  setShown("field-animate-cpu", ui.mode === "cpu");
+  setShown("field-card-style", ui.mode !== "scoring");
+  setShown("field-card-size", ui.mode !== "scoring");
+}
+
+// Switch the selected mode, sync the segmented control + dependent UI, and
+// refresh the resume banner so it reflects the newly-selected mode's save.
+function selectMode(mode) {
+  if (!MATCH_MODES.includes(mode)) return;
+  ui.mode = mode;
+  const seg = $("mode-seg");
+  if (seg) seg.querySelectorAll(".seg-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+  showModeBlock();
+  renderResumeBanner();
 }
 
 function renderNameFields() {
@@ -440,28 +465,58 @@ function renderScoringNames() {
     inp.maxLength = 20;
     inp.autocomplete = "off";
     inp.placeholder = `Player ${i + 1} name`;
-    inp.addEventListener("input", () => { ui.scoring.playerNames[i] = inp.value.trim(); });
+    inp.addEventListener("input", () => {
+      ui.scoring.playerNames[i] = inp.value.trim();
+      renderScoringDealer();
+    });
     wrap.appendChild(inp);
   }
 }
 
+function renderScoringDealer() {
+  const sel = $("scoring-dealer-select");
+  if (!sel) return;
+  const names = [];
+  for (let i = 0; i < ui.scoring.numPlayers; i++) {
+    names.push((ui.scoring.playerNames[i] || "").trim() || defaultName(i));
+  }
+  const prev = ui.scoring.dealerChoice;
+  sel.innerHTML = "";
+  const optR = document.createElement("option");
+  optR.value = "random"; optR.textContent = "Random";
+  sel.appendChild(optR);
+  for (let i = 0; i < names.length; i++) {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = names[i];
+    sel.appendChild(o);
+  }
+  sel.value = (prev === "random" || Number(prev) < names.length) ? prev : "0";
+  ui.scoring.dealerChoice = sel.value;
+  sel.onchange = () => { ui.scoring.dealerChoice = sel.value; };
+}
+
 function onStartMatch() {
+  const mode = ui.mode;
   const start = () => {
-    if (ui.mode === "scoring") return startScoringMatch();
-    if (ui.mode === "cpu") return startSoloMatch();
+    if (mode === "scoring") return startScoringMatch();
+    if (mode === "cpu") return startSoloMatch();
     return startMultiplayerMatch();
   };
-  if (hasSnapshot()) {
+  // Only the selected mode's slot is at risk — other modes' saves are untouched.
+  if (hasSnapshot(mode)) {
     showConfirm({
-      title: "Start a new match?",
-      body: "You have a saved match in progress. Starting a new one will overwrite it.",
+      title: `Start a new ${MODE_TITLES[mode]} match?`,
+      body: `You have a saved ${MODE_TITLES[mode]} match in progress. Starting a new one will overwrite it. Your other saved games are kept.`,
       confirmLabel: "Start new",
-      onConfirm: () => { storageClear(); start(); },
+      onConfirm: () => { storageClear(mode); start(); },
     });
     return;
   }
   start();
 }
+
+const MODE_TITLES = { multiplayer: "Multiplayer", cpu: "Solo vs CPU", scoring: "Scoring" };
 
 // Simple modal-confirm wrapper. Pulls in the static markup defined in index.html.
 function showConfirm({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", onConfirm }) {
@@ -521,7 +576,10 @@ function startScoringMatch() {
   for (let i = 0; i < ui.scoring.numPlayers; i++) {
     names.push((ui.scoring.playerNames[i] || "").trim() || defaultName(i));
   }
-  state = createScoringMatch(names, 0);
+  const dealerIndex = ui.scoring.dealerChoice === "random"
+    ? randomInt(names.length)
+    : Math.min(Number(ui.scoring.dealerChoice) || 0, names.length - 1);
+  state = createScoringMatch(names, dealerIndex);
   startScoringRound(state);
   persist();
   goScoringRoundScreen();
@@ -1272,9 +1330,12 @@ function exitToStart() {
   // If the user bails mid-tutorial via Save & exit, tear down the coach so
   // it doesn't linger on the start screen.
   tutorial.endTutorial();
+  // Land the start screen on the mode we just left so its resume banner shows
+  // the match we just saved (selectMode also re-renders the banner).
+  const leftMode = state && state.mode;
   state = null;
   ui.selectedIds.clear();
-  renderResumeBanner();
+  if (leftMode) selectMode(leftMode); else renderResumeBanner();
   showScreen("screen-start");
 }
 
@@ -1457,11 +1518,12 @@ function wireUp() {
     }
   });
   $("new-match-btn").addEventListener("click", () => {
+    const finishedMode = state && state.mode;
+    discardSave(finishedMode);
     state = null;
     ui.selectedIds.clear();
-    discardSave();
+    if (finishedMode) selectMode(finishedMode); else renderResumeBanner();
     showScreen("screen-start");
-    renderResumeBanner();
   });
 
   // Modal closers
@@ -1474,7 +1536,7 @@ function wireUp() {
   // Resume banner
   $("resume-go").addEventListener("click", resumeFromSave);
   $("resume-discard").addEventListener("click", () => {
-    discardSave();
+    discardSave(ui.mode);
     renderResumeBanner();
   });
 
@@ -2256,24 +2318,25 @@ function renderProfileAchievements(profile, mode) {
 }
 
 // ---------- Resume from saved match ----------
+// The resume banner reflects the currently-selected mode's saved game (each
+// mode has its own slot), so switching modes shows that mode's resumable match.
 function renderResumeBanner() {
-  const snapshot = storageLoad();
+  const mode = ui.mode;
+  const snapshot = storageLoad(mode);
   const banner = $("resume-banner");
-  if (!snapshot || !snapshot.state || !snapshot.state.mode) {
-    if (snapshot) discardSave();
+  if (!snapshot || !snapshot.state || snapshot.state.mode !== mode) {
+    if (snapshot) storageClear(mode); // stale / malformed slot
     banner.classList.add("hidden");
     return;
   }
   const s = snapshot.state;
-  const detail = s.mode === "scoring"
-    ? `Scoring · round ${s.round}/${TOTAL_ROUNDS}`
-    : `${s.mode === "cpu" ? "Solo" : "Multiplayer"} · round ${s.round || 1}/${TOTAL_ROUNDS}`;
+  const detail = `${MODE_TITLES[mode]} · round ${s.round || 1}/${TOTAL_ROUNDS}`;
   $("resume-banner-detail").textContent = ` ${detail}`;
   banner.classList.remove("hidden");
 }
 
 function resumeFromSave() {
-  const snapshot = storageLoad();
+  const snapshot = storageLoad(ui.mode);
   if (!snapshot) return;
   state = hydrate(snapshot.state);
   if (!state) { discardSave(); renderResumeBanner(); return; }
@@ -2403,13 +2466,27 @@ function applyUserName(name) {
   if (typeof renderNameFields === "function") renderNameFields();
   if (typeof renderDealerSelect === "function") renderDealerSelect();
   if (typeof renderSoloDealer === "function") renderSoloDealer();
+  if (typeof renderScoringNames === "function") renderScoringNames();
+  if (typeof renderScoringDealer === "function") renderScoringDealer();
+}
+
+// Land on whichever mode has the most recently saved game, so returning
+// players see their last match's resume prompt regardless of mode.
+function selectMostRecentSavedMode() {
+  const all = storageLoadAll();
+  let best = null, bestAt = -1;
+  for (const m of MATCH_MODES) {
+    const snap = all[m];
+    if (snap && (snap.savedAt || 0) > bestAt) { best = m; bestAt = snap.savedAt || 0; }
+  }
+  selectMode(best || ui.mode);
 }
 
 // ---------- Boot ----------
 function boot() {
   buildStart();
   wireUp();
-  renderResumeBanner();
+  selectMostRecentSavedMode();
   setupCardZoom();
   window.addEventListener("resize", () => {
     layoutHand();
