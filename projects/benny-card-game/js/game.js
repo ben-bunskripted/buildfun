@@ -409,6 +409,10 @@ function* combinations(n, k) {
 }
 
 function tableFrozen(state) {
+  // An empty table isn't "frozen" — no one has opened yet, so players will
+  // keep drawing/discarding until someone can. Without this guard, an unlucky
+  // pass of weak hands fires no-way-out on the very first discard.
+  if (state.table.length === 0) return false;
   for (const s of state.table) {
     if (s.type === "run") return false;
     if (s.type === "number" && s.cards.length < 4) return false;
