@@ -104,7 +104,11 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       handEl.insertBefore(ph, card.nextSibling);
       ctx.placeholder = ph;
 
-      // Lift the card out of flow.
+      // Lift the card out of flow. Reparent to <body> so position:fixed is
+      // relative to the viewport — .hand-section's backdrop-filter would
+      // otherwise make it a containing block, pinning the card inside the
+      // hand bar (well below the visible viewport edge).
+      document.body.appendChild(card);
       card.style.position = "fixed";
       card.style.zIndex = "200";
       card.style.left = left + "px";
