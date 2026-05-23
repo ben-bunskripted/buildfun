@@ -3,16 +3,16 @@
 // Files prefixed with "_" are treated as helper modules by Netlify, not
 // deployed as their own endpoints.
 
-import { neon } from "@neondatabase/serverless";
+import { neon } from "@netlify/neon";
 
 let _sql = null;
 // Lazily create the Neon client so importing this module never throws when the
-// DB env var is missing (e.g. during local static-only development).
+// DB env var is missing. `@netlify/neon`'s neon() reads NETLIFY_DATABASE_URL
+// automatically — and its presence in package.json is what tells Netlify to
+// provision the database + inject that env var on deploy.
 export function db() {
   if (_sql) return _sql;
-  const url = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
-  if (!url) throw new Error("NETLIFY_DATABASE_URL is not set — enable Netlify DB on this site.");
-  _sql = neon(url);
+  _sql = neon();
   return _sql;
 }
 

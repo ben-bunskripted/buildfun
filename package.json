@@ -5,6 +5,6 @@
   "description": "buildfun.co — static site + Netlify Functions for Benny online multiplayer",
   "type": "module",
   "dependencies": {
-    "@neondatabase/serverless": "^0.10.4"
+    "@netlify/neon": "^0.1.2"
   }
 }
