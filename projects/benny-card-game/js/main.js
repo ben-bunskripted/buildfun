@@ -1365,6 +1365,7 @@ function wireUp() {
     {
       resolveDropTarget: resolveDropTarget,
       onDropOnTarget: handleDropOnTarget,
+      onPlaceholderMove: layoutHand,
     },
   );
 

@@ -21,6 +21,7 @@ const DRAG_THRESHOLD_PX = 6;
 export function makeHandReorderable(handEl, onReorder, opts = {}) {
   const resolveDropTarget = opts.resolveDropTarget || (() => null);
   const onDropOnTarget = opts.onDropOnTarget || (() => {});
+  const onPlaceholderMove = opts.onPlaceholderMove || (() => {});
   let active = null;
   let currentTarget = null;
   function clearTargetHover() {
@@ -76,6 +77,10 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
     const startDrag = (ev) => {
       ctx.armed = true;
       ctx.dragging = true;
+      // Capture the from-index before we reparent the card to <body> below —
+      // once it leaves handEl.children, an index lookup at drop time would
+      // miss it and we'd skip onReorder, snapping the card back on re-render.
+      ctx.fromIndex = [...handEl.children].indexOf(card);
       // getBoundingClientRect returns the screen-aligned bbox, which for a
       // fan-rotated card is *wider* than the card itself and offset from its
       // top-left. To keep the dragged card's intrinsic size (and to not warp
@@ -126,6 +131,9 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       window.addEventListener("selectstart", preventNative, true);
       window.addEventListener("contextmenu", preventNative, true);
       document.body.classList.add("hand-dragging");
+      // Let the host re-run its fan layout so the placeholder picks up the
+      // right tilt for the slot it now occupies.
+      onPlaceholderMove();
     };
 
     if (isTouch) {
@@ -186,7 +194,11 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
         }
       }
       const ref = siblings[targetIdx] || null;
+      // Only re-fan when the placeholder actually changed slots — pointermove
+      // fires constantly during a drag and layoutHand isn't free.
+      const prevNext = ctx.placeholder.nextSibling;
       handEl.insertBefore(ctx.placeholder, ref);
+      if (ctx.placeholder.nextSibling !== prevNext) onPlaceholderMove();
     }
 
     function onUp(ev) {
@@ -205,27 +217,11 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       if (ctx.timer) clearTimeout(ctx.timer);
 
       if (ctx.dragging) {
-        // Determine drop position.
-        const slotEls = [...handEl.children];
-        let fromIndex = -1;
-        // The card is still in DOM with position:fixed; its DOM index pre-existed.
-        // Recompute "from" by ignoring placeholder.
-        let visualIdx = 0;
-        for (const el of slotEls) {
-          if (el === ctx.placeholder) continue;
-          if (el === card) { fromIndex = visualIdx; break; }
-          visualIdx++;
-        }
-        const visualPlaceholderIdx = (function () {
-          let i = 0;
-          for (const el of slotEls) {
-            if (el === card) continue;
-            if (el === ctx.placeholder) return i;
-            i++;
-          }
-          return i;
-        })();
-        const toIndex = visualPlaceholderIdx;
+        // Determine drop position. fromIndex was captured at startDrag time
+        // (before reparenting); the placeholder marks the destination slot
+        // in the live hand.
+        const fromIndex = ctx.fromIndex;
+        const toIndex = [...handEl.children].indexOf(ctx.placeholder);
 
         // Was the pointer over an external drop target on release?
         const finalTarget = currentTarget;
