@@ -2330,8 +2330,8 @@ function renderResumeBanner() {
     return;
   }
   const s = snapshot.state;
-  const detail = `${MODE_TITLES[mode]} · round ${s.round || 1}/${TOTAL_ROUNDS}`;
-  $("resume-banner-detail").textContent = ` ${detail}`;
+  $("resume-banner-title").textContent = `Resume ${MODE_TITLES[mode]} match?`;
+  $("resume-banner-detail").textContent = ` Round ${s.round || 1} of ${TOTAL_ROUNDS}`;
   banner.classList.remove("hidden");
 }
 
