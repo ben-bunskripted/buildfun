@@ -124,6 +124,12 @@ body {
 .start-hero {
   display: block;
   width: calc(100% + 48px);
+  /* The art is a square (so the buildfun project card can use it 1:1), but the
+     logo only fills the middle band. Crop to a shorter banner here so the start
+     panel doesn't carry tall navy dead space above/below the logo. */
+  aspect-ratio: 7 / 5;
+  object-fit: cover;
+  object-position: center;
   margin: 0 -24px 18px;
 }
 
