@@ -11,16 +11,23 @@ working with zero configuration. The steps below only enable the **Online** tab.
 
 ## 1. Enable Netlify DB
 
-In the Netlify dashboard for this site: **Project configuration → Database →
-Enable Netlify DB** (provisions a Neon Postgres instance).
-
-This injects a `NETLIFY_DATABASE_URL` environment variable into the functions
-at build/runtime — the code reads it automatically (see
+The functions use the **`@netlify/neon`** driver (declared in the root
+`package.json`). Netlify's Neon Database extension detects this package and
+provisions a Neon Postgres instance, injecting a `NETLIFY_DATABASE_URL`
+environment variable that the code reads automatically (see
 `netlify/functions/_lib.mjs`). No connection string lives in the repo.
 
-> The driver dependency (`@neondatabase/serverless`) is declared in the
-> root `package.json`. Netlify installs it during deploy. If you deploy via the
-> CLI, run `npm install` first.
+Two ways to provision:
+
+- **Dashboard:** **Project configuration → Database → Enable Netlify DB**, then
+  **redeploy** so the running functions pick up `NETLIFY_DATABASE_URL`.
+- **CLI:** `netlify db init` (creates the database and sets the env var on the
+  site), then deploy.
+
+> Important: `@netlify/neon` must be present in `package.json` for the env var
+> to be wired up, and the site must be **redeployed after** the DB is enabled —
+> otherwise functions throw "connection string is not provided … `NETLIFY_DATABASE_URL`".
+> If you deploy via the CLI, run `npm install` first.
 
 ## 2. Enable Netlify Identity
 
@@ -105,6 +112,6 @@ the ~1.5s poll latency a non-issue, so there are no websockets to manage.
 | --- | --- |
 | "Online play isn't available" on the Online tab | Identity widget didn't load (offline, or Identity not enabled on the site). |
 | 401 from any function | Not signed in, or Identity not enabled. |
-| 500 mentioning `NETLIFY_DATABASE_URL` | Netlify DB not enabled, or env var missing in the deploy context. |
+| 500 mentioning `NETLIFY_DATABASE_URL` / "connection string is not provided" | Netlify DB not enabled, or the site wasn't redeployed after enabling it (the env var is injected at deploy time). Re-trigger a deploy. |
 | Functions work but no tables | Run `/.netlify/functions/setup-db` once while signed in. |
 | Polls seem to return stale state | Make sure the deployed `sw.js` is v39+ (it bypasses `/.netlify/functions`). Bump the cache and refresh. |
