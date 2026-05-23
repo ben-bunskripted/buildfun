@@ -469,6 +469,39 @@ body {
   outline: none;
 }
 .top-bar-menu-list .menu-item:active { background: rgba(255,255,255,0.16); }
+
+/* Non-button content inside the menu — currently the Card size picker. The
+   segmented control is reskinned dark to match the rest of the menu (the
+   start-screen .seg is light, intended for the white card panel). */
+.top-bar-menu-list .menu-section {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 12px 10px;
+}
+.top-bar-menu-list .menu-section + .menu-item {
+  border-top: 1px solid rgba(255,255,255,0.10);
+  margin-top: 4px; padding-top: 12px;
+  border-radius: 0 0 8px 8px;
+}
+.menu-section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.seg.menu-seg {
+  background: rgba(0,0,0,0.25);
+  border-color: rgba(255,255,255,0.12);
+  padding: 3px; gap: 2px;
+  align-self: stretch;
+}
+.seg.menu-seg .seg-btn {
+  font-size: 13px; padding: 6px 10px;
+  color: rgba(255,255,255,0.75);
+  flex: 1; text-align: center;
+}
+.seg.menu-seg .seg-btn.active {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  box-shadow: none;
+}
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--panel-soft);

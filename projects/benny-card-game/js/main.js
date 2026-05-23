@@ -71,6 +71,29 @@ function applyCardSizePref(size) {
   document.documentElement.dataset.cardSize = value;
 }
 
+// Update every card-size segmented control in the DOM to show `ui.cardSize`
+// as active. Run whenever the value changes — either from the start screen,
+// from a hamburger menu, or after a load.
+function syncCardSizeSegs() {
+  const segs = document.querySelectorAll("#card-size-seg, [data-menu-card-size]");
+  segs.forEach(seg => {
+    seg.querySelectorAll(".seg-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.size === ui.cardSize);
+    });
+  });
+}
+
+function setCardSize(size) {
+  if (!CARD_SIZE_VALUES.has(size) || size === ui.cardSize) return;
+  ui.cardSize = size;
+  applyCardSizePref(size);
+  savePrefs({ ...loadPrefs(), cardSize: size });
+  syncCardSizeSegs();
+  // The card sizing affects hand layout overlap + fan tilt, so re-run the
+  // fitter. Safe to call when the hand is empty — it bails on n === 0.
+  if (typeof layoutHand === "function") layoutHand();
+}
+
 // Apply persisted card style preference before any cards are rendered.
 {
   const prefs = loadPrefs();
@@ -199,20 +222,10 @@ function buildStart() {
     savePrefs({ ...loadPrefs(), cardStyle: ui.cardStyle });
   });
 
-  // Card size picker — overrides the breakpoint-driven default.
-  const sizeSeg = $("card-size-seg");
-  sizeSeg.querySelectorAll(".seg-btn").forEach(b => {
-    b.classList.toggle("active", b.dataset.size === ui.cardSize);
-  });
-  sizeSeg.addEventListener("click", (e) => {
-    const btn = e.target.closest(".seg-btn");
-    if (!btn) return;
-    sizeSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    ui.cardSize = btn.dataset.size;
-    applyCardSizePref(ui.cardSize);
-    savePrefs({ ...loadPrefs(), cardSize: ui.cardSize });
-  });
+  // Card size picker — overrides the breakpoint-driven default. The same
+  // control is mirrored in the play/scoring hamburger menus; setCardSize()
+  // keeps every seg in sync and re-lays out the hand.
+  syncCardSizeSegs();
 
   // Animate CPU moves toggle.
   const animSeg = $("animate-cpu-seg");
@@ -1148,24 +1161,56 @@ function layoutHand() {
   const available = Math.max(0, hand.clientWidth - padX);
 
   if (ui.handFanned) {
+    // The fan rotates each card around a pivot 220% below it (see
+    // transform-origin in .hand.fanned > .card). That pivot is far enough
+    // away that the edge cards' top corners swing well past the card's own
+    // box — at XL on a narrow phone the leftmost corner can land off-screen.
+    // Account for that swing here: compute how much extra horizontal space
+    // the rotation needs at each end, then fit the row to (available - swing).
+    const cardH = parseFloat(getComputedStyle(cards[0]).height) || (cardW * 1.55);
+    const pivotY = 2.2 * cardH;
+    const swingFor = (deg) => {
+      const r = (deg * Math.PI) / 180;
+      return (cardW / 2) * (1 - Math.cos(r)) + pivotY * Math.sin(r);
+    };
+
+    // Default tilt: ≤4° per card, capped so 8+ cards don't fan into a half-circle.
+    let stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
+    let edgeDeg = stepDeg * (n - 1) / 2;
+
     // Heavy overlap so cards stack like in a real hand. Show ~45% of each
     // card's left edge by default; tighten further if the row would overflow.
+    const minStep = Math.max(1, Math.round(cardW * 0.08));
     let overlap = -Math.round(cardW * 0.55);
+
     if (n > 1 && available > 0) {
-      // Width with current overlap: cardW + (n-1)*(cardW + overlap).
+      const swing = swingFor(edgeDeg);
+      const budget = Math.max(0, available - 2 * swing);
       const fannedWidth = cardW + (n - 1) * (cardW + overlap);
-      if (fannedWidth > available) {
-        const step = (available - cardW) / (n - 1);
-        // Keep at least 8% of each card visible so the fan stays legible.
-        const minStep = Math.max(1, Math.round(cardW * 0.08));
-        overlap = Math.max(step, minStep) - cardW;
+      if (fannedWidth > budget) {
+        const step = (budget - cardW) / (n - 1);
+        if (step >= minStep) {
+          overlap = step - cardW;
+        } else {
+          // Min overlap still doesn't leave room for the full tilt — pull
+          // the rotation in so the corners don't shoot off-screen. The
+          // resulting fan is flatter but still visibly fanned when possible.
+          overlap = minStep - cardW;
+          const tightWidth = cardW + (n - 1) * (cardW + overlap);
+          const swingBudget = Math.max(0, (available - tightWidth) / 2);
+          if (swingBudget <= 0 || pivotY <= 0) {
+            edgeDeg = 0;
+          } else {
+            const r = Math.asin(Math.min(1, swingBudget / pivotY));
+            edgeDeg = Math.min(edgeDeg, (r * 180) / Math.PI);
+          }
+          stepDeg = n > 1 ? (2 * edgeDeg) / (n - 1) : 0;
+        }
       }
     }
+
     hand.style.setProperty("--hand-overlap", `${overlap}px`);
-    // Per-card tilt. Cap the total spread so 8 cards don't look like an
-    // explosion.
-    const stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
-    const startDeg = -stepDeg * (n - 1) / 2;
+    const startDeg = -edgeDeg;
     cards.forEach((c, i) => {
       const rot = startDeg + stepDeg * i;
       c.style.setProperty("--card-rot", `${rot.toFixed(2)}deg`);
@@ -1267,6 +1312,13 @@ function wireTopBarMenu(btnId, listId) {
   });
 }
 document.addEventListener("click", (e) => {
+  // Card size segs (start screen + both hamburger menus) all route through
+  // setCardSize so they stay in sync.
+  const sizeBtn = e.target.closest("#card-size-seg .seg-btn, [data-menu-card-size] .seg-btn");
+  if (sizeBtn) {
+    setCardSize(sizeBtn.dataset.size);
+    return;
+  }
   if (e.target.closest(".top-bar-menu")) return;
   closeAllTopBarMenus();
 });
