@@ -3,6 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>
+    // Netlify Identity emails (password recovery, signup confirmation, invites,
+    // magic links) link to the site root, but the Identity widget lives in the
+    // Benny game at /projects/benny-card-game/. Forward any token hash there so
+    // the widget can complete the flow.
+    (function () {
+      var h = window.location.hash || "";
+      var isToken =
+        /[#&](recovery_token|confirmation_token|invite_token|email_change_token)=/.test(h) ||
+        (/[#&]access_token=/.test(h) && /[#&]token_type=/.test(h)) ||
+        /[#&]error=/.test(h);
+      if (isToken) window.location.replace("/projects/benny-card-game/" + h);
+    })();
+  </script>
   <title>buildfun.co — Play. Create. Inspire.</title>
   <meta name="description" content="Little projects, made for fun. Play, create, inspire, together." />
   <link rel="icon" type="image/png" href="logo.png" />
