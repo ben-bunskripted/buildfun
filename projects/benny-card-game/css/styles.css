@@ -513,6 +513,55 @@ body {
   border-color: rgba(245,196,81,0.55);
   box-shadow: 0 0 0 1px rgba(245,196,81,0.25) inset;
 }
+.other-player.is-cpu-thinking {
+  border-color: rgba(74,144,226,0.7);
+  box-shadow: 0 0 0 1px rgba(74,144,226,0.45) inset, 0 0 16px rgba(74,144,226,0.35);
+  animation: cpuThinkPulse 1.4s ease-in-out infinite;
+}
+@keyframes cpuThinkPulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(74,144,226,0.45) inset, 0 0 16px rgba(74,144,226,0.35); }
+  50%      { box-shadow: 0 0 0 1px rgba(74,144,226,0.7) inset,  0 0 26px rgba(74,144,226,0.55); }
+}
+
+/* Ghost card used for CPU-turn animations. Sits above everything, ignores
+   pointer events, and uses CSS transitions to glide between rects. */
+.flying-card {
+  position: fixed;
+  pointer-events: none;
+  z-index: 240;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 4px 8px rgba(0,0,0,0.25);
+  border-radius: var(--card-radius);
+}
+
+/* Lock interaction while a CPU turn is animating — buttons and the hand
+   are dimmed and pointer-disabled, but the human's cards stay visible. */
+body.cpu-animating .hand-actions,
+body.cpu-animating #draw-pile,
+body.cpu-animating #discard-pile,
+body.cpu-animating .hand .card {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Drop-target hover affordances — applied by dragdrop.js while a card is
+   actively hovering over a legal target during a drag. */
+.discard-pile.is-drop-hover .pile-card-host,
+.discard-pile.is-drop-hover .pile-card {
+  outline: 3px solid rgba(245,196,81,0.95);
+  outline-offset: 2px;
+  border-radius: var(--card-radius);
+}
+#all-melds .meld.is-drop-hover {
+  outline: 2px solid rgba(74,144,226,0.85);
+  outline-offset: -2px;
+  background: rgba(74,144,226,0.18);
+}
+#all-melds .card.is-drop-hover {
+  outline: 3px solid rgba(245,196,81,0.95);
+  outline-offset: 2px;
+  border-radius: var(--card-radius);
+  z-index: 2;
+}
 .other-player-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px;

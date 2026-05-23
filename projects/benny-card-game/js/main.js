@@ -6,9 +6,10 @@ import {
   createMatch, startNextRound, beginTurn, currentPlayer, topOfDiscard,
   drawFromDeck, drawFromDiscard, placeNewSet, addToSet, swapWildcard,
   discard, isMatchOver, advanceToNextRound, matchWinnerIndex,
+  isNoWayOut, finalizeNoWayOut,
   WILDCARD_ORDER, ROUND_NAMES, TOTAL_ROUNDS, serialize, hydrate,
 } from "./game.js";
-import { validateNewSet, validateAddition, describeRunArrangement, describeAddition } from "./rules.js";
+import { validateNewSet, validateAddition, validateSwap, describeRunArrangement, describeAddition } from "./rules.js";
 import { makeHandReorderable } from "./dragdrop.js";
 import { planTurn } from "./ai.js";
 import {
@@ -58,6 +59,9 @@ let ui = {
   // Card-size override applied as `data-card-size` on <html>. "m" is the
   // breakpoint-driven default (no override); s/l/xl scale the --card-w/h vars.
   cardSize: "m",
+  // When true, CPU turns play out as on-table card animations instead of the
+  // recap modal. Persisted as prefs.animateCpu.
+  animateCpu: false,
 };
 
 const CARD_SIZE_VALUES = new Set(["s", "m", "l", "xl"]);
@@ -78,6 +82,9 @@ function applyCardSizePref(size) {
   }
   if (CARD_SIZE_VALUES.has(prefs.cardSize)) {
     ui.cardSize = prefs.cardSize;
+  }
+  if (typeof prefs.animateCpu === "boolean") {
+    ui.animateCpu = prefs.animateCpu;
   }
   setCardStyle(ui.cardStyle);
   applyCardSizePref(ui.cardSize);
@@ -205,6 +212,20 @@ function buildStart() {
     ui.cardSize = btn.dataset.size;
     applyCardSizePref(ui.cardSize);
     savePrefs({ ...loadPrefs(), cardSize: ui.cardSize });
+  });
+
+  // Animate CPU moves toggle.
+  const animSeg = $("animate-cpu-seg");
+  animSeg.querySelectorAll(".seg-btn").forEach(b => {
+    b.classList.toggle("active", (b.dataset.anim === "on") === ui.animateCpu);
+  });
+  animSeg.addEventListener("click", (e) => {
+    const btn = e.target.closest(".seg-btn");
+    if (!btn) return;
+    animSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    ui.animateCpu = btn.dataset.anim === "on";
+    savePrefs({ ...loadPrefs(), animateCpu: ui.animateCpu });
   });
 
   $("start-btn").addEventListener("click", onStartMatch);
@@ -593,6 +614,15 @@ function routeTurnStart() {
     renderAll();
     return;
   }
+  // Solo vs CPU has no device to pass — drop the human straight into play.
+  if (state.mode === "cpu" && p.kind === "human") {
+    beginTurn(state);
+    ui.selectedIds.clear();
+    showScreen("screen-play");
+    renderAll();
+    tutorial.notify("showHand");
+    return;
+  }
   goPassScreen();
 }
 
@@ -620,24 +650,26 @@ function runCpuTurn() {
   const player = currentPlayer(state);
   beginTurn(state);
   const plan = planTurn(state, player.difficulty || "medium");
-  let roundWon = false;
 
+  if (ui.animateCpu) {
+    runCpuTurnAnimated(player, plan);
+  } else {
+    runCpuTurnInstant(player, plan);
+  }
+}
+
+// Run every action in one shot, then show the recap modal. This is the path
+// used when `ui.animateCpu` is off (the default).
+function runCpuTurnInstant(player, plan) {
+  let roundWon = false;
   for (const action of plan) {
-    let r;
-    if (action.type === "drawDeck") r = drawFromDeck(state);
-    else if (action.type === "drawDiscard") r = drawFromDiscard(state);
-    else if (action.type === "play") r = placeNewSet(state, action.arrangement);
-    else if (action.type === "add") r = addToSet(state, action.setId, action.arrangement);
-    else if (action.type === "swap") r = swapWildcard(state, action.setId, action.positionIndex, action.naturalCardId);
-    else if (action.type === "discard") { r = discard(state, action.cardId); if (r.ok && r.wonRound) roundWon = true; }
-    else continue;
+    const r = applyCpuAction(action);
+    if (action.type === "discard" && r && r.ok && r.wonRound) roundWon = true;
     if (!r || !r.ok) {
-      // AI produced an illegal action — surface and abort cleanly to a discard.
       console.warn("CPU action failed:", action, r);
       break;
     }
   }
-  // Safety: if the plan never discarded (e.g., interrupted), force a discard.
   if (!roundWon && state.phase === "canAct") {
     const me = currentPlayer(state);
     if (me.hand.length) {
@@ -647,9 +679,18 @@ function runCpuTurn() {
       plan.push({ type: "discard", cardId: fallback.id, narration: `discarded ${fallback.rank}${SUIT_GLYPH[fallback.suit]}` });
     }
   }
-
   persist();
   showCpuRecap(player.name, plan, roundWon);
+}
+
+function applyCpuAction(action) {
+  if (action.type === "drawDeck") return drawFromDeck(state);
+  if (action.type === "drawDiscard") return drawFromDiscard(state);
+  if (action.type === "play") return placeNewSet(state, action.arrangement);
+  if (action.type === "add") return addToSet(state, action.setId, action.arrangement);
+  if (action.type === "swap") return swapWildcard(state, action.setId, action.positionIndex, action.naturalCardId);
+  if (action.type === "discard") return discard(state, action.cardId);
+  return null;
 }
 
 function showCpuRecap(playerName, plan, roundWon) {
@@ -672,6 +713,235 @@ function showCpuRecap(playerName, plan, roundWon) {
     modal.classList.add("hidden");
     routeTurnStart();
   };
+}
+
+// ---------- Animated CPU turn ----------
+const ANIM_STEP_MS = 460;          // duration of a single card glide
+const ANIM_GAP_MS = 140;           // pause between consecutive steps
+
+function rectOf(el) {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+function cpuRowEl(playerIdx) {
+  return document.querySelectorAll("#all-melds .other-player")[playerIdx] || null;
+}
+function rectOfCpuRow(playerIdx) {
+  const row = cpuRowEl(playerIdx);
+  if (!row) return null;
+  // Aim at the right side of the row's header so the deck/discard pile is a
+  // long way away — makes the motion visually obvious.
+  const r = row.getBoundingClientRect();
+  // A virtual "card slot" sized to the current --card-w.
+  const cs = getComputedStyle(document.documentElement);
+  const w = parseFloat(cs.getPropertyValue("--card-w")) || 60;
+  const h = parseFloat(cs.getPropertyValue("--card-h")) || 92;
+  return { left: r.right - w - 8, top: r.top + 6, width: w, height: h };
+}
+function rectOfMeldCard(setId, positionIndex) {
+  const meld = document.querySelector(`#all-melds .meld[data-set-id="${setId}"]`);
+  if (!meld) return null;
+  const cards = meld.querySelectorAll(".card");
+  if (positionIndex >= cards.length) return null;
+  return rectOf(cards[positionIndex]);
+}
+
+function flyEl(el, fromRect, toRect, opts = {}) {
+  el.classList.add("flying-card");
+  Object.assign(el.style, {
+    position: "fixed",
+    left: fromRect.left + "px",
+    top: fromRect.top + "px",
+    width: fromRect.width + "px",
+    height: fromRect.height + "px",
+    margin: "0",
+    transition: `left ${ANIM_STEP_MS}ms cubic-bezier(.4,.06,.2,1), top ${ANIM_STEP_MS}ms cubic-bezier(.4,.06,.2,1), width ${ANIM_STEP_MS}ms cubic-bezier(.4,.06,.2,1), height ${ANIM_STEP_MS}ms cubic-bezier(.4,.06,.2,1), opacity ${ANIM_STEP_MS}ms ease-out`,
+    zIndex: "240",
+    pointerEvents: "none",
+  });
+  el.style.setProperty("--card-w", fromRect.width + "px");
+  el.style.setProperty("--card-h", fromRect.height + "px");
+  document.body.appendChild(el);
+  el.offsetHeight;       // reflow so the transition runs from the from-rect
+  Object.assign(el.style, {
+    left: toRect.left + "px",
+    top: toRect.top + "px",
+    width: toRect.width + "px",
+    height: toRect.height + "px",
+    opacity: opts.fadeOut ? "0" : "1",
+  });
+  el.style.setProperty("--card-w", toRect.width + "px");
+  el.style.setProperty("--card-h", toRect.height + "px");
+  return new Promise(resolve => {
+    setTimeout(() => { el.remove(); resolve(); }, ANIM_STEP_MS + 20);
+  });
+}
+
+function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runCpuTurnAnimated(player, plan) {
+  // Surface the play screen first — the dealer's opening CPU turn arrives
+  // straight from the reveal screen with the play DOM still inactive.
+  showScreen("screen-play");
+  renderAll();
+  // Brief lead-in so the user sees the CPU's row before the deck flickers.
+  const playerIdx = state.players.indexOf(player);
+  const row = cpuRowEl(playerIdx);
+  if (row) row.classList.add("is-cpu-thinking");
+  // Lock the play screen into "spectator" mode so the human's hand stays
+  // visible and the action buttons don't react to clicks during the CPU's
+  // turn. Cleared in the finally block.
+  document.body.classList.add("cpu-animating");
+  await pause(280);
+
+  let roundWon = false;
+  try {
+    for (const action of plan) {
+      const r = await stepCpuAnimated(action);
+      if (action.type === "discard" && r && r.ok && r.wonRound) roundWon = true;
+      if (!r || !r.ok) break;
+    }
+    if (!roundWon && state.phase === "canAct") {
+      const me = currentPlayer(state);
+      if (me.hand.length) {
+        const fallback = me.hand[me.hand.length - 1];
+        const act = { type: "discard", cardId: fallback.id, narration: `discarded ${fallback.rank}${SUIT_GLYPH[fallback.suit]}` };
+        plan.push(act);
+        const r = await stepCpuAnimated(act);
+        if (r && r.ok && r.wonRound) roundWon = true;
+      }
+    }
+  } finally {
+    if (row) row.classList.remove("is-cpu-thinking");
+    document.body.classList.remove("cpu-animating");
+  }
+  persist();
+  if (roundWon) {
+    await pause(400);
+    goRoundEnd();
+  } else {
+    await pause(200);
+    routeTurnStart();
+  }
+}
+
+// During a CPU animated turn we render only the PUBLIC parts of state: the
+// table, the deck/discard piles, and the top bar. The hand-section is left
+// untouched so the human keeps seeing their own cards.
+function renderPublicState() {
+  renderTopBar();
+  renderAllMelds();
+  renderMiddle();
+  requestAnimationFrame(updateMeldOverflowFlags);
+}
+
+// Apply one CPU action, then animate the visual delta. Returns the action
+// result so the caller can detect roundWon / failures.
+async function stepCpuAnimated(action) {
+  const playerIdx = state.currentPlayerIndex;
+  // Capture pre-mutation rects — some sources disappear after the engine runs.
+  const drawPileR = rectOf(document.getElementById("draw-pile"));
+  const discardR = rectOf(document.querySelector("#discard-host > *") || document.getElementById("discard-pile"));
+  const cpuR = rectOfCpuRow(playerIdx);
+  // For swap: capture the wild card's slot before it's replaced.
+  let wildSlotR = null;
+  let wildCardData = null;
+  if (action.type === "swap") {
+    wildSlotR = rectOfMeldCard(action.setId, action.positionIndex);
+    const set = state.table.find(s => s.id === action.setId);
+    if (set) wildCardData = { card: set.cards[action.positionIndex].card, represents: { rank: set.cards[action.positionIndex].representsRank, suit: set.type === "run" ? set.cards[action.positionIndex].representsSuit : null } };
+  }
+  // For discard: the card moving and its top-of-discard target rect (preview).
+  let discardedCardData = null;
+  if (action.type === "discard") {
+    discardedCardData = state.players[playerIdx].hand.find(c => c.id === action.cardId);
+  }
+  // For drawDiscard: peek the top card so we can fly its face.
+  let topDiscardCard = null;
+  if (action.type === "drawDiscard") {
+    topDiscardCard = state.discardPile[state.discardPile.length - 1];
+  }
+
+  const result = applyCpuAction(action);
+  if (!result || !result.ok) return result;
+  renderPublicState();
+
+  // Animate based on what just happened.
+  const flights = [];
+  if (action.type === "drawDeck") {
+    // Face-down card from deck → CPU row, fade out (we don't reveal).
+    if (drawPileR && cpuR) {
+      const ghost = renderCardBack();
+      flights.push(flyEl(ghost, drawPileR, cpuR, { fadeOut: true }));
+    }
+  } else if (action.type === "drawDiscard") {
+    if (discardR && cpuR && topDiscardCard) {
+      const wild = isWildcard(topDiscardCard, state.wildcardRank);
+      const ghost = renderCard(topDiscardCard, { wild });
+      flights.push(flyEl(ghost, discardR, cpuR, { fadeOut: true }));
+    }
+  } else if (action.type === "play") {
+    // Each new card in the meld animates from the CPU row → its slot.
+    if (cpuR) {
+      const newSet = state.table[state.table.length - 1];
+      if (newSet) {
+        for (let i = 0; i < newSet.cards.length; i++) {
+          const dest = rectOfMeldCard(newSet.id, i);
+          if (!dest) continue;
+          const c = newSet.cards[i];
+          const opts = c.isWild ? { wild: true, represents: { rank: c.representsRank, suit: newSet.type === "run" ? c.representsSuit : null } } : {};
+          const ghost = renderCard(c.card, opts);
+          flights.push(flyEl(ghost, cpuR, dest));
+        }
+      }
+    }
+  } else if (action.type === "add") {
+    if (cpuR) {
+      const set = state.table.find(s => s.id === action.setId);
+      if (set) {
+        // The added cards are the most-recently-appended ones for number sets;
+        // for runs the layout can re-sort, so just animate the cards whose ids
+        // match the arrangement's added[] list.
+        const addedIds = new Set((action.arrangement.added || []).map(a => a.card.id));
+        for (let i = 0; i < set.cards.length; i++) {
+          if (!addedIds.has(set.cards[i].card.id)) continue;
+          const dest = rectOfMeldCard(set.id, i);
+          if (!dest) continue;
+          const c = set.cards[i];
+          const opts = c.isWild ? { wild: true, represents: { rank: c.representsRank, suit: set.type === "run" ? c.representsSuit : null } } : {};
+          const ghost = renderCard(c.card, opts);
+          flights.push(flyEl(ghost, cpuR, dest));
+        }
+      }
+    }
+  } else if (action.type === "swap") {
+    // Wild flies out to the CPU; natural flies in.
+    if (wildSlotR && cpuR && wildCardData) {
+      const wildGhost = renderCard(wildCardData.card, { wild: true, represents: wildCardData.represents });
+      flights.push(flyEl(wildGhost, wildSlotR, cpuR, { fadeOut: true }));
+    }
+    const dest = rectOfMeldCard(action.setId, action.positionIndex);
+    if (cpuR && dest) {
+      const set = state.table.find(s => s.id === action.setId);
+      if (set) {
+        const naturalSlot = set.cards[action.positionIndex];
+        const ghost = renderCard(naturalSlot.card, {});
+        flights.push(flyEl(ghost, cpuR, dest));
+      }
+    }
+  } else if (action.type === "discard") {
+    const newTopR = rectOf(document.querySelector("#discard-host > *"));
+    if (cpuR && newTopR && discardedCardData) {
+      const wild = discardedCardData.rank === state.wildcardRank;
+      const ghost = renderCard(discardedCardData, { wild });
+      flights.push(flyEl(ghost, cpuR, newTopR));
+    }
+  }
+
+  await Promise.all(flights);
+  await pause(ANIM_GAP_MS);
+  return result;
 }
 
 // ---------- Play screen rendering ----------
@@ -723,7 +993,13 @@ function renderAllMelds() {
     head.className = "other-player-head";
     const name = document.createElement("div");
     name.className = "player-name";
-    name.textContent = i === state.currentPlayerIndex ? `${p.name} (you)` : p.name;
+    // In solo mode the "(you)" tag follows the human's row (always the same
+    // row); in multiplayer it follows the active turn (since the pass screen
+    // gates who's looking at the device).
+    const isYou = state.mode === "cpu"
+      ? p.kind === "human"
+      : i === state.currentPlayerIndex;
+    name.textContent = isYou ? `${p.name} (you)` : p.name;
     if (i === state.dealerIndex) {
       const chip = document.createElement("span");
       chip.className = "dealer-chip";
@@ -812,10 +1088,22 @@ function renderMiddle() {
   discardBtn.disabled = !discardActive;
 }
 
+// In solo-vs-CPU we keep the human's hand on screen even when it's a CPU's
+// turn (so the user can keep planning). Multiplayer always shows the active
+// player (the pass screen gates everyone else).
+function handViewerIdx() {
+  if (state && state.mode === "cpu") {
+    const idx = state.players.findIndex(p => p.kind === "human");
+    if (idx >= 0) return idx;
+  }
+  return state.currentPlayerIndex;
+}
+
 function renderHand() {
   const hand = $("hand");
   hand.innerHTML = "";
-  const me = currentPlayer(state);
+  const me = state.players[handViewerIdx()];
+  if (!me) return;
   for (const c of me.hand) {
     const wild = isWildcard(c, state.wildcardRank);
     const el = renderCard(c, { wild });
@@ -999,13 +1287,20 @@ function wireUp() {
     tutorial.notify("selectionChange", { selectedIds: ui.selectedIds });
   });
 
-  // Drag reorder
-  makeHandReorderable($("hand"), (fromIndex, toIndex) => {
-    const me = currentPlayer(state);
-    const [moved] = me.hand.splice(fromIndex, 1);
-    me.hand.splice(toIndex, 0, moved);
-    renderHand();
-  });
+  // Drag reorder + drop onto discard/meld/wildcard targets.
+  makeHandReorderable(
+    $("hand"),
+    (fromIndex, toIndex) => {
+      const me = currentPlayer(state);
+      const [moved] = me.hand.splice(fromIndex, 1);
+      me.hand.splice(toIndex, 0, moved);
+      renderHand();
+    },
+    {
+      resolveDropTarget: resolveDropTarget,
+      onDropOnTarget: handleDropOnTarget,
+    },
+  );
 
   // Draw pile / discard pile
   $("draw-pile").addEventListener("click", () => {
@@ -1196,6 +1491,88 @@ function chooseAdditionArrangement(arrangements, set, onPick) {
   modal.classList.remove("hidden");
 }
 
+// ---------- Drag-and-drop drop targets ----------
+// Called by dragdrop.js on every pointermove during an active drag, and on
+// release. Walks the elements under the cursor and returns the highest-
+// priority legal target: discard > swap wildcard > add to set. Returns null
+// if the card isn't currently playable to anything under the pointer.
+function resolveDropTarget(clientX, clientY, cardEl) {
+  if (!state) return null;
+  if (state.phase !== "canAct" && state.phase !== "mustDiscard") return null;
+  const me = currentPlayer(state);
+  if (!me) return null;
+  const card = me.hand.find(c => c.id === cardEl.dataset.cardId);
+  if (!card) return null;
+
+  const els = document.elementsFromPoint(clientX, clientY);
+  for (const el of els) {
+    if (!el || el === cardEl) continue;
+    // 1) Discard pile.
+    if (el.closest && el.closest("#discard-pile")) {
+      return { kind: "discard", el: document.getElementById("discard-pile"), data: { cardId: card.id } };
+    }
+    // 2) Wildcard inside a meld → swap, only if natural is legal.
+    const tableCard = el.closest && el.closest("#all-melds .meld .card");
+    if (tableCard && tableCard.classList.contains("is-wild")) {
+      const meld = tableCard.closest(".meld");
+      if (!meld) continue;
+      const setId = meld.dataset.setId;
+      const positionIndex = Number(tableCard.dataset.positionIndex);
+      const set = state.table.find(s => s.id === setId);
+      if (!set || !me.hasOpened) continue;
+      const v = validateSwap(set, positionIndex, card, state.wildcardRank);
+      if (v.ok) {
+        return { kind: "swap", el: tableCard, data: { setId, positionIndex, naturalCardId: card.id } };
+      }
+    }
+    // 3) Meld body → add-to-set, only if validateAddition passes.
+    const meld = el.closest && el.closest("#all-melds .meld");
+    if (meld && me.hasOpened) {
+      const setId = meld.dataset.setId;
+      const set = state.table.find(s => s.id === setId);
+      if (!set) continue;
+      const v = validateAddition(set, [card], state.wildcardRank);
+      if (v.ok) {
+        return { kind: "add", el: meld, data: { setId, cardId: card.id, validation: v } };
+      }
+    }
+  }
+  return null;
+}
+
+function handleDropOnTarget(target, _cardEl) {
+  if (!state) return;
+  if (target.kind === "discard") {
+    // Must keep at least 1 card to discard; engine will refuse otherwise.
+    const r = discard(state, target.data.cardId);
+    if (!r.ok) { toast(r.reason); return; }
+    ui.selectedIds.clear();
+    afterDiscard(r);
+    return;
+  }
+  if (target.kind === "swap") {
+    const r = swapWildcard(state, target.data.setId, target.data.positionIndex, target.data.naturalCardId);
+    if (!r.ok) { toast(r.reason); return; }
+    ui.selectedIds.clear();
+    persist();
+    renderAll();
+    return;
+  }
+  if (target.kind === "add") {
+    const set = state.table.find(s => s.id === target.data.setId);
+    if (!set) return;
+    const v = target.data.validation;
+    if (set.type === "number") {
+      finalizeAddition(set, v.arrangement);
+    } else if (v.arrangements && v.arrangements.length === 1) {
+      finalizeAddition(set, v.arrangements[0]);
+    } else if (v.arrangements && v.arrangements.length > 1) {
+      chooseAdditionArrangement(v.arrangements, set, chosen => finalizeAddition(set, chosen));
+    }
+    return;
+  }
+}
+
 function openAddToSetModal() {
   const me = currentPlayer(state);
   if (!me.hasOpened) { toast("Open with your own set first."); return; }
@@ -1232,7 +1609,7 @@ function openAddToSetModal() {
       cardsEl.appendChild(renderCard(c.card, opts));
     }
     row.appendChild(cardsEl);
-    row.addEventListener("click", () => {
+    const commit = () => {
       modal.classList.add("hidden");
       const v = opt.validation;
       if (opt.set.type === "number") {
@@ -1241,7 +1618,13 @@ function openAddToSetModal() {
         if (v.arrangements.length === 1) finalizeAddition(opt.set, v.arrangements[0]);
         else chooseAdditionArrangement(v.arrangements, opt.set, (chosen) => finalizeAddition(opt.set, chosen));
       }
-    });
+    };
+    const btn = document.createElement("button");
+    btn.className = "pill primary";
+    btn.textContent = "Add";
+    btn.addEventListener("click", (ev) => { ev.stopPropagation(); commit(); });
+    row.appendChild(btn);
+    row.addEventListener("click", commit);
     list.appendChild(row);
   }
   modal.classList.remove("hidden");
@@ -1329,8 +1712,23 @@ function openSwapModal() {
 function afterDiscard(result) {
   persist();
   tutorial.notify("discard", { wonRound: !!result.wonRound });
-  if (result.wonRound) goRoundEnd();
-  else routeTurnStart();
+  if (result.wonRound) { goRoundEnd(); return; }
+  // Auto-detect a deadlocked round (no runs, all number sets capped, and no
+  // hand can form a new set). Cheaper than scanning every action — discards
+  // are the only state change that can lock down the rank-set count.
+  if (isNoWayOut(state)) {
+    finalizeNoWayOut(state);
+    persist();
+    state.noWayOutTriggered = true;
+    goRoundEnd();
+    return;
+  }
+  // Refresh the play screen so the just-discarded card disappears from the
+  // hand and the new discard-pile top renders, before either kicking off a
+  // CPU turn or transitioning to the pass screen. handViewerIdx keeps the
+  // human's hand visible in solo mode regardless of whose turn comes next.
+  renderAll();
+  routeTurnStart();
 }
 
 // ---------- Scoring-mode screen ----------
@@ -1433,14 +1831,20 @@ function onScoringSubmit() {
 function goRoundEnd() {
   showScreen("screen-round-end");
   const winnerIdx = state.roundWinner;
-  $("round-end-title").textContent = `Round ${ROUND_NAMES[state.round - 1] || state.round} complete`;
-  $("round-end-winner").innerHTML = `<strong>${escapeHTML(state.players[winnerIdx].name)}</strong> took the round.`;
+  const noWayOut = state.roundHistory[state.roundHistory.length - 1] && state.roundHistory[state.roundHistory.length - 1].noWayOut;
+  if (noWayOut) {
+    $("round-end-title").textContent = `NO WAY OUT — round ${ROUND_NAMES[state.round - 1] || state.round}`;
+    $("round-end-winner").innerHTML = `Round ended in deadlock — no winner. Everyone scores their remaining hand.`;
+  } else {
+    $("round-end-title").textContent = `Round ${ROUND_NAMES[state.round - 1] || state.round} complete`;
+    $("round-end-winner").innerHTML = `<strong>${escapeHTML(state.players[winnerIdx].name)}</strong> took the round.`;
+  }
   const tbody = $("round-end-rows");
   tbody.innerHTML = "";
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i];
     const tr = document.createElement("tr");
-    if (i === winnerIdx) tr.className = "winner-row";
+    if (!noWayOut && i === winnerIdx) tr.className = "winner-row";
     tr.innerHTML = `<td>${escapeHTML(p.name)}</td><td>${state.perRoundScores[i]}</td><td><strong>${p.score}</strong></td>`;
     tbody.appendChild(tr);
   }
