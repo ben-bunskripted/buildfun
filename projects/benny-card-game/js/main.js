@@ -16,7 +16,7 @@ import {
   createScoringMatch, startScoringRound, submitScoringRound,
   isScoringMatchOver, advanceScoringRound, scoringWinnerIndex,
 } from "./scoring.js";
-import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot, loadAll as storageLoadAll, MATCH_MODES } from "./storage.js";
+import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot, MATCH_MODES } from "./storage.js";
 import * as tutorial from "./tutorial.js";
 import * as online from "./online.js";
 import * as net from "./net.js";
@@ -2815,25 +2815,6 @@ function applyUserName(name) {
 
 // Land on whichever mode has the most recently saved game, so returning
 // players see their last match's resume prompt regardless of mode.
-function selectMostRecentSavedMode() {
-  const all = storageLoadAll();
-  let best = null, bestAt = -1;
-  for (const m of MATCH_MODES) {
-    const snap = all[m];
-    if (snap && (snap.savedAt || 0) > bestAt) { best = m; bestAt = snap.savedAt || 0; }
-  }
-  if (best) {
-    // Resumable game exists — jump straight to its config step so the resume
-    // banner is the first thing the user sees.
-    goToStartConfigStep(best);
-  } else {
-    // No saves: land on the 4-box pick step. Still call selectMode so any
-    // code that reads `ui.mode` has a sane default (multiplayer).
-    selectMode(ui.mode);
-    goToStartPickStep();
-  }
-}
-
 // ---------- Online multiplayer ----------
 let onlineVisibility = "public";
 let onlineMaxPlayers = 4;
@@ -3382,7 +3363,11 @@ function boot() {
   wireUp();
   buildOnlineUI();
   initOnline();
-  selectMostRecentSavedMode();
+  // Always open on the homepage (mode picker) rather than jumping into the
+  // last-played mode. Saved matches are untouched — their resume banner shows
+  // once the user picks that mode. selectMode keeps ui.mode at a sane default.
+  selectMode(ui.mode);
+  goToStartPickStep();
   setupCardZoom();
   window.addEventListener("resize", () => {
     layoutHand();
