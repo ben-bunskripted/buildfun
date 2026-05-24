@@ -693,6 +693,8 @@ function startTutorialMatch() {
   // and finally exits back to the start screen when the user finishes.
   tutorial.startTutorial({
     beginGameplay: () => { routeTurnStart(); },
+    // Re-sync the hand action buttons when a step changes (see tutorial.js).
+    refreshUi: () => { if (state) renderActions(); },
     exit: () => {
       tutorial.endTutorial();
       // Tutorial state was never persisted (see `persist()` / `isTutorial`),
@@ -1479,10 +1481,10 @@ function renderActions() {
   const canAdd = state.phase === "canAct" && me.hasOpened && ui.selectedIds.size >= 1 && state.table.length > 0;
 
   $("play-set-btn").disabled = !canPlay;
-  // Add/swap isn't covered by the tutorial script; lock it off so a curious tap
-  // doesn't derail the scripted plays.
-  const inTutorial = tutorial.isTutorialActive();
-  $("add-set-btn").disabled = !canAdd || inTutorial;
+  // During the tutorial the Add button is locked off except on the steps that
+  // teach adding / swapping, so a curious tap doesn't derail the scripted plays.
+  const addBlockedByTutorial = tutorial.isTutorialActive() && !tutorial.addActionAllowed();
+  $("add-set-btn").disabled = !canAdd || addBlockedByTutorial;
   const canDiscard = state.phase === "canAct" && ui.selectedIds.size === 1;
   $("discard-btn").disabled = !canDiscard;
 }
@@ -2138,6 +2140,7 @@ async function finalizeAddition(set, arrangement) {
   ui.selectedIds.clear();
   persist();
   renderAll();
+  tutorial.notify("add");
 }
 
 async function finalizeSwap(set, positionIndex, naturalCardId) {
@@ -2149,6 +2152,7 @@ async function finalizeSwap(set, positionIndex, naturalCardId) {
   ui.selectedIds.clear();
   persist();
   renderAll();
+  tutorial.notify("swap");
 }
 
 function afterDiscard(result) {
