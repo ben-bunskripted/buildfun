@@ -229,6 +229,13 @@ export function route() {
     // No need to stop polling — without intermediate writes the actor and
     // poll loop can coexist safely; the poll just echoes what the actor's
     // applyActionRemote already adopted.
+    //
+    // The server stores `phase: "passing"` between turns (engine idle state),
+    // so when we first pick up our own turn from a poll the action handlers
+    // would all gate out (`phase !== "mustDraw"`). beginTurn() flips passing
+    // → mustDraw (or canAct for the dealer's opener). We guard on the entry
+    // phase so mid-turn refreshes don't clobber a canAct/mustDiscard state.
+    if (st.phase === "passing") beginTurn(st);
     cb.endSpectatorLock();
     cb.showScreen("screen-play");
     cb.renderAll();
