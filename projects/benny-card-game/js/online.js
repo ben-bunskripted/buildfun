@@ -114,8 +114,10 @@ export async function advance() {
     }
     // advanceRound: the next poll (or our own immediate refresh) will land the
     // freshly-dealt state. Force a quick refresh so the user doesn't see a stale
-    // round-end screen during the poll window.
-    const data = await net.getRoom(session.roomId, 0, false);
+    // round-end screen during the poll window. `useEtag: false` bypasses the
+    // per-room ETag cache so we always get a body even if the server's seq
+    // happens to match what we last saw.
+    const data = await net.getRoom(session.roomId, 0, { useEtag: false });
     if (data && data.state) {
       adopt(data.state, data.seq);
       session.status = data.status || "playing";
@@ -259,8 +261,12 @@ function ensurePoll() {
     if (net.pollingFor() === session.roomId) return;
     net.stopPolling();
   }
-  const waitFn = () => session && session.status === "playing";
-  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs: 1500, waitFn, onError: onPollError });
+  // Lobby rosters change slowly — poll every 5s. Once status flips to
+  // "playing" we tighten to 1.5s so spectators see opponent actions promptly.
+  // The interval function is consulted per-tick so the loop adapts as
+  // session.status moves lobby → playing → lobby (rematch) without restart.
+  const intervalMs = () => (session && session.status === "playing" ? 1500 : 5000);
+  net.startPolling(session.roomId, () => session.lastSeq, onPollUpdate, { intervalMs, onError: onPollError });
 }
 
 function onPollError(err) {

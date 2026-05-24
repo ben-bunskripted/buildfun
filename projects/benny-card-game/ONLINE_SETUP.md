@@ -95,8 +95,22 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 -- Backs the per-uid sliding-window rate limiter in `_lib.mjs:rateLimit`.
--- Rows are pruned opportunistically by INSERT; you can also schedule a
--- nightly `DELETE FROM rate_limit_log WHERE ts < now() - interval '1 hour'`.
+-- One row per (uid, endpoint, minute-bucket) — a counter, not a log.
+-- Each request UPSERTs and increments the current bucket; the limiter
+-- SUMs counts across buckets in the window. Two orders of magnitude
+-- fewer writes than a row-per-request log.
+CREATE TABLE IF NOT EXISTS rate_limit_bucket (
+  uid TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  bucket_start TIMESTAMPTZ NOT NULL,
+  count INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (uid, endpoint, bucket_start)
+);
+CREATE INDEX IF NOT EXISTS rate_limit_bucket_cleanup
+  ON rate_limit_bucket (bucket_start);
+
+-- Legacy v1 limiter table. The new code never reads or writes it; kept
+-- here for one deploy cycle in case of rollback. Drop in a follow-up.
 CREATE TABLE IF NOT EXISTS rate_limit_log (
   uid TEXT NOT NULL,
   endpoint TEXT NOT NULL,

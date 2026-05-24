@@ -46,7 +46,15 @@ async function authToken() {
   try { return await u.jwt(); } catch (_) { return null; }
 }
 
-async function api(name, { method = "GET", body, query } = {}) {
+// Per-(etagKey) cache of the last ETag the server returned. When the caller
+// passes `etagKey`, the next request sends `If-None-Match: <cached etag>` and
+// a 304 response short-circuits to `{ unchanged: true }` — no JSON parse, no
+// body read. Used by getRoom() so most polls hit a 304 fast path on the
+// server (no state read, no roster read, no presence write).
+const etags = new Map();
+export function clearEtag(key) { etags.delete(key); }
+
+async function api(name, { method = "GET", body, query, etagKey = null, signal = null } = {}) {
   let url = `${API}/${name}`;
   if (query) {
     const qs = new URLSearchParams(query).toString();
@@ -55,12 +63,18 @@ async function api(name, { method = "GET", body, query } = {}) {
   const headers = {};
   const token = await authToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (etagKey) {
+    const prev = etags.get(etagKey);
+    if (prev) headers["If-None-Match"] = prev;
+  }
   const opts = { method, headers };
+  if (signal) opts.signal = signal;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(url, opts);
+  if (etagKey && res.status === 304) return { unchanged: true };
   let data = null;
   try { data = await res.json(); } catch (_) { data = null; }
   if (!res.ok) {
@@ -68,6 +82,10 @@ async function api(name, { method = "GET", body, query } = {}) {
     err.status = res.status;
     err.data = data;
     throw err;
+  }
+  if (etagKey) {
+    const et = res.headers.get("ETag");
+    if (et) etags.set(etagKey, et);
   }
   return data;
 }
@@ -89,10 +107,14 @@ export function startGame(roomId) { return api("start-game", { method: "POST", b
 export function applyAction(roomId, payload) { return api("apply-action", { method: "POST", body: { roomId, ...payload } }); }
 // Host control writes. `action` is "advanceRound" | "finishMatch".
 export function hostControl(roomId, payload) { return api("submit-turn", { method: "POST", body: { roomId, ...payload } }); }
-export function getRoom(roomId, since, wait) {
+// `opts.useEtag = false` bypasses the per-room ETag cache — used by callers
+// that need the full state on the next response regardless of seq (e.g. the
+// immediate refresh after a host advanceRound).
+export function getRoom(roomId, since, opts) {
   const query = { roomId, since: since || 0 };
-  if (wait) query.wait = "1";
-  return api("get-room", { query });
+  const useEtag = !(opts && opts.useEtag === false);
+  const signal = opts && opts.signal ? opts.signal : null;
+  return api("get-room", { query, etagKey: useEtag ? `get-room:${roomId}` : null, signal });
 }
 export function leaveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId } }); }
 export function archiveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId, archive: true } }); }
@@ -102,50 +124,128 @@ export function endGame(roomId) { return api("end-game", { method: "POST", body:
 let pollTimer = null;
 let polling = false;
 let inFlight = false;
+let inFlightAbort = null;
 let pollingRoomId = null;
+let visibilityHandler = null;
 // Bumped on every (re)start so a previous loop's in-flight response can't
 // fire onUpdate after we've swapped to a new session/room.
 let pollGen = 0;
 
-// `waitFn()` is consulted per-tick. When it returns true the request asks the
-// server to long-poll (hold the connection until a new seq lands or ~9s
-// elapses). In long-poll mode the inter-tick interval drops to 200ms — the
-// server-side wait is what paces requests, not a client-side timer.
-export function startPolling(roomId, sinceFn, onUpdate, { intervalMs = 1500, waitFn = null, onError = null } = {}) {
+// Exponential backoff cap. Quiet polls (304 responses) double the next
+// interval up to this ceiling; any 200 (state changed) resets to the base.
+const BACKOFF_MAX_INTERVAL_MS = 5 * 60 * 1000;
+
+// `intervalMs` may be a number or a `() => number` so the caller can adapt
+// the cadence to session state (e.g. 5s in lobby, 1.5s while playing) without
+// restarting the loop. Polling pauses while `document.hidden` and resumes
+// with an immediate tick on `visibilitychange` so a backgrounded tab stops
+// hitting the server but catches up fast on return.
+//
+// Exponential backoff: each 304 (server says "nothing changed") doubles the
+// next interval, capped at BACKOFF_MAX_INTERVAL_MS. Any 200 resets to the
+// base. So a quiet lobby decays from 5s → 10s → 20s → … → 5min over a few
+// minutes; one player joining drops everyone back to 5s on the next tick.
+// The backoff also resets when the base interval changes (e.g. lobby→
+// playing), so a starting game immediately polls at 1.5s rather than
+// inheriting the lobby's stale backoff.
+export function startPolling(roomId, sinceFn, onUpdate, opts = {}) {
   stopPolling();
+  // Fresh session — any cached ETag from a previous poll loop is stale.
+  etags.delete(`get-room:${roomId}`);
   polling = true;
   pollingRoomId = roomId;
   const gen = ++pollGen;
   const alive = () => polling && gen === pollGen;
+  const intervalOpt = opts.intervalMs != null ? opts.intervalMs : 1500;
+  const onError = opts.onError || null;
+  const baseInterval = () => (typeof intervalOpt === "function" ? intervalOpt() : intervalOpt);
+  let backoffStep = 0;
+  let lastBase = null;
+  const nextInterval = () => {
+    const base = baseInterval();
+    // Base changed (lobby → playing or vice versa): drop the accumulated
+    // backoff so the new cadence kicks in immediately.
+    if (lastBase !== null && lastBase !== base) backoffStep = 0;
+    lastBase = base;
+    const backed = base * Math.pow(2, backoffStep);
+    return Math.min(backed, BACKOFF_MAX_INTERVAL_MS);
+  };
+  const docHidden = () => (typeof document !== "undefined" && document.hidden);
   const schedule = () => {
     if (!alive()) return;
-    const useWait = !!(waitFn && waitFn());
-    pollTimer = setTimeout(tick, useWait ? 200 : intervalMs);
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    // Backgrounded → don't schedule; the visibilitychange handler will tick
+    // immediately when the tab comes back.
+    if (docHidden()) return;
+    pollTimer = setTimeout(tick, nextInterval());
   };
   const tick = async () => {
     if (!alive()) return;
+    if (docHidden()) return;
     if (inFlight) { schedule(); return; }
     inFlight = true;
+    // Per-tick AbortController so stopPolling / visibility-hidden can cancel
+    // the long-poll instead of leaving a function invocation alive for ~9 s.
+    const ac = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    inFlightAbort = ac;
     try {
-      const useWait = !!(waitFn && waitFn());
-      const data = await getRoom(roomId, sinceFn(), useWait);
-      if (alive() && onUpdate) await onUpdate(data);
+      const data = await getRoom(roomId, sinceFn(), { signal: ac ? ac.signal : null });
+      if (data && data.unchanged) {
+        // 304 — server said nothing changed. Back off; next interval doubles.
+        backoffStep += 1;
+      } else if (data) {
+        // 200 — fresh state. Snap back to base cadence and notify the caller.
+        backoffStep = 0;
+        if (alive() && onUpdate) await onUpdate(data);
+      }
+      // Errors leave backoffStep alone (handled in catch).
     } catch (e) {
-      // Transient errors are swallowed and retried on the next tick. A 404
-      // means the room was deleted (host ended it, archived to oblivion); let
-      // the caller decide whether to keep polling. Everything else falls
-      // through to the standard retry path.
-      if (alive() && onError) {
+      if (e && (e.name === "AbortError" || e.code === 20)) {
+        // Cancelled by stopPolling or visibility change — not a real error.
+      } else if (alive() && onError) {
+        // Transient errors are swallowed and retried on the next tick. A 404
+        // means the room was deleted (host ended it, archived to oblivion);
+        // let the caller decide whether to keep polling.
         try { await onError(e); } catch (_) {}
       }
     } finally {
       inFlight = false;
+      if (inFlightAbort === ac) inFlightAbort = null;
       schedule();
     }
   };
+  if (typeof document !== "undefined") {
+    visibilityHandler = () => {
+      if (!alive()) return;
+      if (document.hidden) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+        // Cancel any in-flight long-poll: iOS may suspend the request anyway,
+        // and we don't want a phantom response landing when the tab returns.
+        if (inFlightAbort) { try { inFlightAbort.abort(); } catch (_) {} }
+      } else {
+        // Catch up immediately, then resume normal cadence.
+        clearTimeout(pollTimer);
+        pollTimer = null;
+        tick();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
   tick();
 }
 
 export function isPolling() { return polling; }
 export function pollingFor() { return polling ? pollingRoomId : null; }
-export function stopPolling() { polling = false; pollingRoomId = null; clearTimeout(pollTimer); pollTimer = null; }
+export function stopPolling() {
+  polling = false;
+  pollingRoomId = null;
+  clearTimeout(pollTimer);
+  pollTimer = null;
+  if (inFlightAbort) { try { inFlightAbort.abort(); } catch (_) {} inFlightAbort = null; }
+  if (visibilityHandler && typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
+  }
+}

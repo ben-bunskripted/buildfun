@@ -268,6 +268,10 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
       active = null;
     }
 
+    // Listen on `window`, not the dragged card. iOS Safari can silently drop
+    // pointer capture when the captured node is reparented to <body> (the
+    // workaround for transformed-ancestor position:fixed breakage); a global
+    // listener keeps the pointermove stream flowing regardless.
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);

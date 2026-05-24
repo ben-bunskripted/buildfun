@@ -1205,11 +1205,12 @@ function renderAllMelds() {
       : state.mode === "cpu"
         ? p.kind === "human"
         : i === state.currentPlayerIndex;
-    // Opponents in online mode get a presence indicator (dot + "away" label
-    // when offline). Skip self — they're obviously online if they're looking.
-    const rosterEntry = rosterBySeat && !isYou ? rosterBySeat[i] : null;
-    if (rosterEntry && rosterEntry.online === false) row.classList.add("is-opponent-away");
-    const presence = rosterEntry ? presenceMarkup(rosterEntry) : "";
+    // Every online seat (including self) gets a presence indicator. Self is
+    // always green since this very render means they're looking at the page,
+    // but showing the dot keeps the row layout consistent with opponents.
+    const rosterEntry = rosterBySeat ? rosterBySeat[i] : null;
+    if (rosterEntry && !isYou && rosterEntry.online === false) row.classList.add("is-opponent-away");
+    const presence = rosterEntry ? presenceMarkup(rosterEntry, { dotOnly: isYou }) : "";
     name.innerHTML = `${presence}<span class="player-name-text">${escapeHTML(isYou ? `${p.name} (you)` : p.name)}</span>`;
     if (i === state.dealerIndex) {
       const chip = document.createElement("span");

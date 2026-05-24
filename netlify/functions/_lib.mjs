@@ -29,11 +29,21 @@ export function getUser(context) {
   };
 }
 
-export function json(statusCode, body) {
+export function json(statusCode, body, extraHeaders) {
+  const headers = { "Content-Type": "application/json", "Cache-Control": "no-store" };
+  if (extraHeaders) Object.assign(headers, extraHeaders);
+  return { statusCode, headers, body: JSON.stringify(body) };
+}
+
+// 304 Not Modified with an ETag. Used by get-room when the caller's
+// If-None-Match matches the current room version — skips the expensive
+// state reads, roster query, and presence write entirely.
+// `etag` is the raw value (no quotes); per RFC 7232 we wrap it here.
+export function notModified(etag) {
   return {
-    statusCode,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-    body: JSON.stringify(body),
+    statusCode: 304,
+    headers: { ETag: `"${etag}"`, "Cache-Control": "no-store" },
+    body: "",
   };
 }
 
@@ -51,15 +61,21 @@ export function checkBodySize(event, maxBytes) {
   return null;
 }
 
-// ---- Rate limiting (DB-backed sliding window) ----
+// ---- Rate limiting (bucketed counter, sliding window) ----
 //
-// One row per request in `rate_limit_log` (uid, endpoint, ts). Before
-// inserting we count recent rows in the window — if over budget, reject.
-// Cheap (~2 round trips per request) and resilient across function cold
-// starts since the state lives in the DB.
+// One row per (uid, endpoint, minute-bucket) in `rate_limit_bucket`. Each
+// request UPSERTs the current bucket (`count = count + 1`) and SUMs counts
+// across all buckets in the window to enforce the budget. Two orders of
+// magnitude fewer writes than a row-per-request log: an active player polling
+// `get-room` at 1.5s used to produce ~40 INSERTs/min; now they produce ~1
+// UPSERT/min (the same bucket, incremented).
 //
 // Budgets are intentionally generous for a friends-only game; the goal is to
 // stop brute-force / scripted abuse, not throttle real play.
+//
+// Window-snapping note: with 60s buckets and a 60s window, the SUM straddles
+// at most 2 buckets, so peak allowed traffic in a 60s span is ~2× budget.
+// Acceptable for abuse prevention; tighten by shrinking the bucket if needed.
 const RATE_WINDOW_SECONDS = 60;
 const RATE_BUDGETS = {
   // Auth + lobby ops: low-volume, low-cost. Stricter to slow password attacks.
@@ -71,7 +87,7 @@ const RATE_BUDGETS = {
   "start-game":  { max: 10,  window: 60 },
   "list-rooms":  { max: 60,  window: 60 },
   "my-rooms":    { max: 60,  window: 60 },
-  // Gameplay: many actions per turn, long polls per round. Loose budgets.
+  // Gameplay: many actions per turn. Loose budgets.
   "apply-action":{ max: 240, window: 60 },
   "submit-turn": { max: 60,  window: 60 },
   "get-room":    { max: 600, window: 60 },
@@ -86,25 +102,39 @@ export async function rateLimit(sql, user, endpoint) {
   const cfg = RATE_BUDGETS[endpoint] || RATE_BUDGETS.default;
   const windowSec = cfg.window || RATE_WINDOW_SECONDS;
   try {
-    // Count requests in the rolling window, then insert this one. Race
-    // tolerated: we don't need transactional accuracy, only an effective cap.
+    // Upsert current bucket, then sum other buckets in the window. Postgres
+    // data-modifying CTEs run with the same snapshot as the outer query, so
+    // the SELECT can't see the UPSERT's effect — we work around that by
+    // explicitly excluding the current bucket from the SELECT and adding the
+    // post-upsert count back in. Result: one round trip, accurate total.
     const rows = await sql`
-      SELECT count(*)::int AS n
-      FROM rate_limit_log
-      WHERE uid = ${user.uid} AND endpoint = ${endpoint}
-        AND ts > now() - (${windowSec} || ' seconds')::interval`;
-    const n = rows && rows[0] ? Number(rows[0].n) : 0;
-    if (n >= cfg.max) {
+      WITH up AS (
+        INSERT INTO rate_limit_bucket (uid, endpoint, bucket_start, count)
+        VALUES (${user.uid}, ${endpoint}, date_trunc('minute', now()), 1)
+        ON CONFLICT (uid, endpoint, bucket_start)
+        DO UPDATE SET count = rate_limit_bucket.count + 1
+        RETURNING count
+      ),
+      prior AS (
+        SELECT COALESCE(SUM(count), 0)::int AS n
+        FROM rate_limit_bucket
+        WHERE uid = ${user.uid}
+          AND endpoint = ${endpoint}
+          AND bucket_start > now() - (${windowSec} || ' seconds')::interval
+          AND bucket_start < date_trunc('minute', now())
+      )
+      SELECT ((SELECT count FROM up) + (SELECT n FROM prior))::int AS total`;
+    const total = rows && rows[0] ? Number(rows[0].total) : 0;
+    if (total > cfg.max) {
       return json(429, {
         error: "Too many requests — slow down.",
         retryAfterSeconds: windowSec,
       });
     }
-    await sql`INSERT INTO rate_limit_log (uid, endpoint, ts) VALUES (${user.uid}, ${endpoint}, now())`;
-    // Opportunistic cleanup: ~1% of inserts also prune stale rows so the
-    // table doesn't grow unbounded. Cheaper than running a cron.
-    if (Math.random() < 0.01) {
-      await sql`DELETE FROM rate_limit_log WHERE ts < now() - interval '1 hour'`;
+    // Opportunistic cleanup. Rare (0.1%) and cheap — the bucket table grows
+    // far slower than the old log table, so daily-ish pruning is plenty.
+    if (Math.random() < 0.001) {
+      await sql`DELETE FROM rate_limit_bucket WHERE bucket_start < now() - interval '5 minutes'`;
     }
   } catch (_err) {
     // Fail open. A short DB blip shouldn't 429 paying users.

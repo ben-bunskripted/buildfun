@@ -70,7 +70,7 @@ netlify/functions/
 ├── my-rooms.mjs            # GET:  signed-in user's active tables (resume affordance)
 ├── leave-room.mjs          # POST: drop a seat
 ├── start-game.mjs          # POST: host signal to deal; server shuffles + deals from room_seats
-├── get-room.mjs            # GET:  poll endpoint, supports ?wait=1 long-poll; returns redacted state
+├── get-room.mjs            # GET:  poll endpoint; ETag/304 fast path; returns redacted state
 ├── apply-action.mjs        # POST: server-authoritative move commit; validates + applies via engine
 ├── submit-turn.mjs         # POST: host control writes (advanceRound / finishMatch only)
 └── end-game.mjs            # POST: host-only, hard-deletes the room (cascade)
@@ -243,9 +243,9 @@ Tables (schema lives in ONLINE_SETUP.md §3; create once via the Neon SQL Editor
 
 - `users (uid PK, display_name, created_at)` — populated by `auth-sync` on first sign-in; canonical source for seat display names (see `_lib.mjs:canonicalDisplayName`).
 - `rooms (id PK = join code, name, host_uid, visibility, password_hash?, status, max_players, …)`. `password_hash` is PBKDF2-SHA256 / 210k iterations (`_lib.mjs:hashPassword`); the legacy single-round-SHA-256 format is still accepted by `verifyPassword` for any pre-cutover rows.
-- `room_seats (room_id, seat_index, uid, display_name, connected, last_seen_at, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored. `last_seen_at` is bumped by every `get-room` poll and powers the presence indicator (see "Presence" below).
+- `room_seats (room_id, seat_index, uid, display_name, connected, last_seen_at, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored. `last_seen_at` is bumped by `get-room` polls (throttled to once per 15 s per seat) and powers the presence indicator (see "Presence" below).
 - `games (room_id PK, seq, current_seat, status, state JSONB, last_turn JSONB, updated_at)`. State is server-authoritative; reads through `get-room` / `apply-action` are always redacted for the caller's seat.
-- `rate_limit_log (uid, endpoint, ts)` — backs `_lib.mjs:rateLimit`. Sliding-window per-uid/per-endpoint counter; budgets defined in `_lib.mjs:RATE_BUDGETS`.
+- `rate_limit_bucket (uid, endpoint, bucket_start, count)` PK on (uid, endpoint, bucket_start) — backs `_lib.mjs:rateLimit`. Bucketed sliding-window counter: each request UPSERTs the current minute-bucket and the limiter SUMs counts across buckets in the window. Budgets defined in `_lib.mjs:RATE_BUDGETS`.
 
 Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:makeRoomCode`.
 
@@ -254,18 +254,22 @@ Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:make
 ### Presence
 
 Every `get-room` poll doubles as a heartbeat. The endpoint bumps the caller's
-`room_seats.last_seen_at = now()` (after the long-poll wait, so the response
-reflects the just-bumped timestamp) and returns each seat tagged with
-`online` (last seen within 20s) plus the ISO `lastSeenAt`. The client renders
+`room_seats.last_seen_at = now()` — throttled to once per 60s so a tight poll
+loop doesn't write per-request — and returns each seat tagged with
+`online` (last seen within 90s) plus the ISO `lastSeenAt`. The client renders
 a green/grey dot in the lobby roster and on in-game opponent rows; offline
 seats also get a small "away" / "away 2m" / "away 1h" label and the row
 fades to ~65% opacity. Self is never decorated (you're obviously looking
 at the page). Presence is purely a UX signal — it doesn't gate any
 server-side authorization, which still keys off seat membership and `connected`.
 
-### Polling (`get-room` + long-poll)
+### Polling (`get-room` + ETag/304 fast path)
 
-`net.js` runs a single in-flight, self-rescheduling poll loop. The `waitFn` consulted per tick decides whether to ask the server to long-poll: in the lobby roster changes don't bump `games.seq`, so we short-poll (1500 ms); once status flips to `playing`, we ask for `?wait=1` and the function holds the request up to ~9 s, polling the row every 600 ms, until a newer seq appears. That drops perceived turn latency from ~750 ms to ~50 ms.
+`net.js` runs a single in-flight, self-rescheduling poll loop. The base interval is dynamic: 5 s in the lobby, 1.5 s once status flips to `playing`. Each poll sends `If-None-Match: "<seq>-<roomsUpdatedAtEpoch>"`; when both halves match the server's current values, it returns 304 with no body and skips the heavy state/roster reads + presence write. The composite is needed because lobby joins/leaves bump `rooms.updated_at` without touching `games.seq` — seq-only ETag would hide new players from the host. Polling pauses while `document.hidden` and resumes with an immediate tick on `visibilitychange`, so a backgrounded tab stops hitting the server but catches up fast on return.
+
+**Exponential backoff:** each 304 doubles the next poll interval, capped at 5 minutes. Any 200 (state changed) resets to the base. So a quiet lobby decays from 5 s → 10 s → 20 s → … → 5 min over a few minutes; one player joining or any in-game action drops every poller back to the base on the next tick. The backoff also resets when the base changes (lobby → playing), so a starting game polls at 1.5 s immediately rather than inheriting the lobby's stale backoff.
+
+**Known limitation:** `room_seats.last_seen_at` updates do NOT invalidate the ETag. A player who AFKs and returns won't reappear as "online" on other screens until something else bumps the version (a join, leave, or game action). Acceptable for friends-only multiplayer; presence catches up the next time anything material happens.
 
 ### Turn commits + optimistic concurrency
 

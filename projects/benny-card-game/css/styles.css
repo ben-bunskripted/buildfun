@@ -132,6 +132,11 @@ body {
   object-position: center;
   margin: 0 -24px 18px;
 }
+@supports not (aspect-ratio: 1) {
+  /* Safari < 15 fallback: fixed height keeps the banner crop instead of letting
+     the intrinsic square art expand the panel. */
+  .start-hero { height: 220px; }
+}
 
 .field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .field-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.08em; }
@@ -696,6 +701,7 @@ body.cpu-animating .hand .card {
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
   position: relative;
+  scrollbar-width: none;
 }
 .meld::-webkit-scrollbar { display: none; }
 .meld.selectable { cursor: pointer; outline: 2px dashed transparent; transition: outline-color 0.15s; }
