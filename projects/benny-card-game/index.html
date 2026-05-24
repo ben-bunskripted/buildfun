@@ -701,14 +701,13 @@
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
-  <!-- Update banner: shown when a new service worker has been downloaded
-       and is waiting to activate. The page-side script in this file fills
-       in the click handler. -->
-  <div id="update-banner" class="update-banner hidden" role="status" aria-live="polite">
-    <span class="update-banner-text">A new version is ready.</span>
-    <button type="button" class="pill primary" id="update-refresh-btn">Refresh</button>
-    <button type="button" class="update-banner-dismiss" id="update-dismiss-btn" aria-label="Dismiss">&times;</button>
-  </div>
+  <!-- Update banner: a fixed strip pinned above the top bar, shown when a new
+       service worker is waiting to activate while the user is mid-game. The
+       whole strip is the tap target; clicking reloads into the new version.
+       Page-side wiring (show + click handler) lives in js/sw-register.js. -->
+  <button type="button" id="update-banner" class="update-banner hidden" aria-live="polite">
+    New version available — tap to reload
+  </button>
 
 </div>
 <script type="module" src="js/main.js"></script>

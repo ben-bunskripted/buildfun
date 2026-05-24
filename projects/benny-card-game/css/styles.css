@@ -1440,34 +1440,47 @@ body.hand-dragging textarea {
    Surfaces a "new version downloaded" prompt when a fresh service worker
    has finished installing and is waiting to activate. Persistent (unlike
    the toast) until the user refreshes or dismisses. */
+/* Full-width strip pinned to the very top, above the sticky .top-bar (z 5).
+   It's fixed (so it can't scroll out of view) and `body.update-pending`
+   pads #app down by the strip's height so it pushes the UI down rather than
+   overlaying it. The safe-area inset keeps the label clear of the notch on
+   standalone iOS; the same calc is mirrored in the #app padding so the two
+   stay in lockstep. */
 .update-banner {
-  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-  background: rgba(8, 24, 50, 0.95);
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.15);
-  padding: 8px 12px 8px 16px;
-  border-radius: 999px;
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 1000;
+  appearance: none; -webkit-appearance: none;
+  margin: 0;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: calc(44px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 16px 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  z-index: 90;
-  box-shadow: var(--shadow-lg);
-  max-width: calc(100% - 32px);
-  font-size: 14px;
-}
-.update-banner .pill { padding: 6px 14px; font-size: 13px; }
-.update-banner-dismiss {
-  appearance: none;
-  background: transparent;
+  justify-content: center;
+  gap: 8px;
+  background: var(--accent-deep);
+  color: #fff;
   border: 0;
-  color: rgba(255,255,255,0.7);
+  border-bottom: 1px solid rgba(255,255,255,0.18);
+  box-shadow: var(--shadow-md);
   font: inherit;
-  font-size: 18px;
-  line-height: 1;
-  padding: 4px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
   cursor: pointer;
 }
-.update-banner-dismiss:hover { color: #fff; }
+.update-banner:hover { background: var(--accent); }
+.update-banner:active { filter: brightness(1.08); }
+body.update-pending #app {
+  padding-top: calc(44px + env(safe-area-inset-top, 0px));
+}
+/* The sticky top bar pins to top:0 of the viewport; push its sticky anchor
+   down by the strip height so a scrollable screen doesn't park it behind
+   the strip. */
+body.update-pending .top-bar {
+  top: calc(44px + env(safe-area-inset-top, 0px));
+}
 
 /* ---------- Toast ---------- */
 .toast {

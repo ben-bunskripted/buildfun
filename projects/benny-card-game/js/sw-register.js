@@ -34,13 +34,14 @@ if ("serviceWorker" in navigator) {
           applyUpdate(worker);
           return;
         }
+        // Mid-game: pin the persistent top strip. `update-pending` on <body>
+        // pads #app down so the strip sits above the nav bar without ever
+        // overlaying play. The whole strip is the tap target.
         const banner = document.getElementById("update-banner");
-        const refresh = document.getElementById("update-refresh-btn");
-        const dismiss = document.getElementById("update-dismiss-btn");
-        if (!banner || !refresh) return;
+        if (!banner) return;
         banner.classList.remove("hidden");
-        refresh.onclick = () => applyUpdate(worker);
-        if (dismiss) dismiss.onclick = () => banner.classList.add("hidden");
+        document.body.classList.add("update-pending");
+        banner.onclick = () => applyUpdate(worker);
       }
 
       // If a previous tab already installed the new SW and we're loading
