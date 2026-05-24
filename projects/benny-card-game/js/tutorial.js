@@ -22,26 +22,27 @@ let highlightedEls = [];
 // Round 1 wildcard rank is A.
 // Players: [human (index 0), CPU dealer (index 1)].
 // Deal order with dealerIndex=1: positions 0,2,4,6,8,10,12 → human;
-// positions 1,3,5,7,9,11,13,14 → CPU (last is dealer's 8th).
-// Position 15 is the top of the remaining deck — the human's draw on turn 2.
+// positions 1,3,5,7,9,11,13,14 → CPU (last is dealer's 8th). The dealer opens
+// without drawing, so position 15 is the human's draw on turn 2.
 //
 // Hands after the deal:
-//   Human: 5C, 5D, 5H, 5S, 7S, 8S, AC
-//     → after drawing JH on turn 2: 5C, 5D, 5H, 5S, 7S, 8S, AC, JH
-//     → play 5C-5D-5H (number set), then 5S-7S-8S-AC (run with wild=6S),
-//       discard JH to go out.
-//   CPU dealer: 2C, 3D, 4H, 6C, JS, JC, QD, KH
+//   Human: 5C, 5D, 5H, 5S, 10S, JS, QS
+//     → after drawing AC on turn 2: 5C, 5D, 5H, 5S, 10S, JS, QS, AC
+//     → play 5C-5D-5H (number set), then 10S-QS-AC (run with wild = J♠),
+//       add 5S to the 5s (four of a kind), swap the real J♠ for the wild
+//       (wild returns to hand), then discard the wild to go out.
+//   CPU dealer: 2C, 3D, 4H, 6C, 7D, JC, QD, KH
 //     → no sets / runs / wildcards available, just discards highest-value card.
 const SEEDED_TOP = [
   "5C", "2C",
   "5D", "3D",
   "5H", "4H",
   "5S", "6C",
-  "7S", "JS",
-  "8S", "JC",
-  "AC", "QD",
+  "10S", "7D",
+  "JS", "JC",
+  "QS", "QD",
   "KH",
-  "JH",
+  "AC",
 ];
 
 export function tutorialDeck() {
@@ -60,6 +61,15 @@ export function selectableCardIds() {
   const step = steps[stepIdx];
   if (!step || step.awaitEvent !== "selectionChange") return null;
   return step.highlightCards || null;
+}
+
+// The Add button is locked off during the tutorial except on the steps that
+// explicitly teach adding / swapping — otherwise a curious tap could derail the
+// scripted plays. Main consults this when enabling the button.
+export function addActionAllowed() {
+  if (!active) return false;
+  const step = steps[stepIdx];
+  return !!step && (step.awaitEvent === "add" || step.awaitEvent === "swap");
 }
 
 export function startTutorial(cbs) {
@@ -139,31 +149,65 @@ function buildSteps() {
     },
     {
       kind: "coach",
-      text: "Nice — that's a number set. Now let's build a spades run with your wildcard. Select 5♠, 7♠, 8♠, and the Ace of Clubs.",
+      text: "Nice — that's a number set. Now let's build a spades run with your wildcard. Select 10♠, Q♠, and the Ace of Clubs.",
       targetSelector: "#hand",
-      highlightCards: ["5S", "7S", "8S", "AC"],
+      highlightCards: ["10S", "QS", "AC"],
       awaitEvent: "selectionChange",
       awaitGuard: (p) => {
         const sel = p.selectedIds;
-        return sel && sel.size === 4
-          && ["5S", "7S", "8S", "AC"].every(id => sel.has(id));
+        return sel && sel.size === 3
+          && ["10S", "QS", "AC"].every(id => sel.has(id));
       },
     },
     {
       kind: "coach",
-      text: "Tap Play set. The wildcard fills the gap as 6♠, making the run 5♠-6♠-7♠-8♠.",
+      text: "Tap Play set. The wildcard fills the gap as J♠, making the run 10♠-J♠-Q♠.",
       targetSelector: "#play-set-btn",
       awaitEvent: "playSet",
     },
     {
       kind: "coach",
-      text: "You have one card left. Tap it to select, then tap the discard pile — an empty hand means you go out and win the round.",
+      text: "You can grow sets that are already on the table. You're still holding the 5♠ — tap it to select it.",
+      targetSelector: "#hand",
+      highlightCards: ["5S"],
+      awaitEvent: "selectionChange",
+      awaitGuard: (p) => {
+        const sel = p.selectedIds;
+        return sel && sel.size === 1 && sel.has("5S");
+      },
+    },
+    {
+      kind: "coach",
+      text: "Tap Add, then choose your set of 5s. The 5♠ joins them for four of a kind.",
+      targetSelector: "#add-set-btn",
+      awaitEvent: "add",
+    },
+    {
+      kind: "coach",
+      text: "See the wildcard standing in for J♠ in your run? You're holding the real J♠. Tap it to select it.",
+      targetSelector: "#hand",
+      highlightCards: ["JS"],
+      awaitEvent: "selectionChange",
+      awaitGuard: (p) => {
+        const sel = p.selectedIds;
+        return sel && sel.size === 1 && sel.has("JS");
+      },
+    },
+    {
+      kind: "coach",
+      text: "Tap Add and choose the run again. Because J♠ is exactly what the wildcard is standing in for, Benny swaps them — the J♠ takes its place and the wildcard comes back to your hand.",
+      targetSelector: "#add-set-btn",
+      awaitEvent: "swap",
+    },
+    {
+      kind: "coach",
+      text: "The wildcard is back in your hand, and it's your last card. Tap it, then tap the discard pile — an empty hand means you go out and win the round.",
       targetSelector: "#discard-pile",
       awaitEvent: "discard",
     },
     {
       kind: "modal",
-      text: "You went out! Your score this round is 0 — your opponent scores the cards still in their hand. After 14 rounds the lowest cumulative score wins. Tap Finish to leave the tutorial.",
+      text: "You went out! You played a set and a run, grew a set with Add, and swapped a wildcard back into your hand — all from the one Add button. (When a card could either be added or swap a wild, Benny asks which you want.) Your score this round is 0; after 14 rounds the lowest total wins. Tap Finish to leave the tutorial.",
       buttonLabel: "Finish",
       onAdvance: () => callbacks.exit(),
     },
@@ -212,6 +256,11 @@ function showStep(step) {
   if (step.highlightCards && step.highlightCards.length) {
     highlightCards(step.highlightCards);
   }
+
+  // Re-sync the hand action buttons to the new step. Advancing on a gameplay
+  // event (e.g. a card selection) doesn't otherwise re-render them, so the Add
+  // button — which is gated per-step — would lag a step behind without this.
+  if (callbacks && callbacks.refreshUi) callbacks.refreshUi();
 }
 
 function advance() {

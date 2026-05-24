@@ -693,6 +693,8 @@ function startTutorialMatch() {
   // and finally exits back to the start screen when the user finishes.
   tutorial.startTutorial({
     beginGameplay: () => { routeTurnStart(); },
+    // Re-sync the hand action buttons when a step changes (see tutorial.js).
+    refreshUi: () => { if (state) renderActions(); },
     exit: () => {
       tutorial.endTutorial();
       // Tutorial state was never persisted (see `persist()` / `isTutorial`),
@@ -1466,7 +1468,7 @@ function handHint() {
   if (state.phase === "canAct") {
     if (ui.selectedIds.size === 0) return "Select cards to play a set, or pick one and tap the discard pile to end your turn.";
     if (ui.selectedIds.size === 1) return "Tap the discard pile to discard this card.";
-    return "Tap Play set or Add to set.";
+    return "Tap Play set or Add.";
   }
   return "";
 }
@@ -1474,16 +1476,15 @@ function handHint() {
 function renderActions() {
   const canPlay = ui.selectedIds.size >= 3 && state.phase === "canAct";
   const me = currentPlayer(state);
-  const wildsOnTable = state.table.some(s => s.cards.some(c => c.isWild));
+  // The Add button covers both adding to a set and swapping a wildcard out of
+  // one — the per-set modal works out which apply to the selected card(s).
   const canAdd = state.phase === "canAct" && me.hasOpened && ui.selectedIds.size >= 1 && state.table.length > 0;
-  const canSwap = state.phase === "canAct" && me.hasOpened && wildsOnTable;
 
   $("play-set-btn").disabled = !canPlay;
-  // Add-to-set and swap-wild aren't covered by the tutorial script; lock them
-  // off so a curious tap doesn't derail the scripted plays.
-  const inTutorial = tutorial.isTutorialActive();
-  $("add-set-btn").disabled = !canAdd || inTutorial;
-  $("swap-btn").disabled = !canSwap || inTutorial;
+  // During the tutorial the Add button is locked off except on the steps that
+  // teach adding / swapping, so a curious tap doesn't derail the scripted plays.
+  const addBlockedByTutorial = tutorial.isTutorialActive() && !tutorial.addActionAllowed();
+  $("add-set-btn").disabled = !canAdd || addBlockedByTutorial;
   const canDiscard = state.phase === "canAct" && ui.selectedIds.size === 1;
   $("discard-btn").disabled = !canDiscard;
 }
@@ -1730,11 +1731,8 @@ function wireUp() {
     playValidatedNewSet(v);
   });
 
-  // Add to set
-  $("add-set-btn").addEventListener("click", openAddToSetModal);
-
-  // Swap wild
-  $("swap-btn").addEventListener("click", openSwapModal);
+  // Add to a set (or swap a wildcard out of one — the modal works out which)
+  $("add-set-btn").addEventListener("click", openAddOrSwapModal);
 
   // Discard the selected card — same path as tapping the discard pile, but
   // surfaced as a button in the hand actions row for discoverability.
@@ -1790,7 +1788,6 @@ function wireUp() {
 
   // Modal closers
   $("modal-pick-cancel").addEventListener("click", () => $("modal-pick-set").classList.add("hidden"));
-  $("modal-swap-cancel").addEventListener("click", () => $("modal-swap").classList.add("hidden"));
 
   // Scoring submit
   $("sc-submit").addEventListener("click", onScoringSubmit);
@@ -1992,14 +1989,8 @@ async function handleDropOnTarget(target, _cardEl) {
     return;
   }
   if (target.kind === "swap") {
-    const r = await online.applyOnlineOrLocal({
-      action: { type: "swap", setId: target.data.setId, positionIndex: target.data.positionIndex, naturalCardId: target.data.naturalCardId },
-      localApply: () => swapWildcard(state, target.data.setId, target.data.positionIndex, target.data.naturalCardId),
-    });
-    if (!r.ok) { toast(r.reason); return; }
-    ui.selectedIds.clear();
-    persist();
-    renderAll();
+    const set = state.table.find(s => s.id === target.data.setId);
+    if (set) finalizeSwap(set, target.data.positionIndex, target.data.naturalCardId);
     return;
   }
   if (target.kind === "add") {
@@ -2027,7 +2018,12 @@ async function handleDropOnTarget(target, _cardEl) {
 function runAddDrop(target) {
   const set = state.table.find(s => s.id === target.data.setId);
   if (!set) return;
-  const v = target.data.validation;
+  runAddArrangement(set, target.data.validation);
+}
+
+// Commit an addition given a validateAddition result. Number sets have a single
+// arrangement; runs may have one (commit directly) or several (prompt).
+function runAddArrangement(set, v) {
   if (set.type === "number") {
     finalizeAddition(set, v.arrangement);
   } else if (v.arrangements && v.arrangements.length === 1) {
@@ -2058,21 +2054,37 @@ function showSwapOrAddChoice({ onSwap, onAdd }) {
   modal.classList.remove("hidden");
 }
 
-function openAddToSetModal() {
+// Unified "Add" flow: select card(s) in hand, then pick a target set. Each set
+// is offered if the selection can be added to it, or — when exactly one card is
+// selected — if that card can swap a wildcard out of it. When a set supports
+// BOTH for the chosen card, picking it prompts add-vs-swap (the same choice the
+// drag-onto-wildcard gesture offers via resolveDropTarget).
+function openAddOrSwapModal() {
   const me = currentPlayer(state);
   if (!me.hasOpened) { toast("Open with your own set first."); return; }
   const cards = [...ui.selectedIds].map(id => me.hand.find(c => c.id === id)).filter(Boolean);
   if (!cards.length) { toast("Select at least one card to add."); return; }
-  // Compute valid sets for these cards.
+  // Swap takes a single natural card for a single wildcard, so it's only in
+  // play when exactly one card is selected.
+  const single = cards.length === 1 ? cards[0] : null;
+
   const options = [];
   for (const s of state.table) {
-    const v = validateAddition(s, cards, state.wildcardRank);
-    if (v.ok) options.push({ set: s, validation: v });
+    const add = validateAddition(s, cards, state.wildcardRank);
+    let swap = null;
+    if (single) {
+      for (let i = 0; i < s.cards.length; i++) {
+        if (!s.cards[i].isWild) continue;
+        if (validateSwap(s, i, single, state.wildcardRank).ok) { swap = { positionIndex: i }; break; }
+      }
+    }
+    if (add.ok || swap) options.push({ set: s, add: add.ok ? add : null, swap, naturalCardId: single ? single.id : null });
   }
   if (!options.length) {
     toast("Those cards don't fit any set on the table.");
     return;
   }
+
   const modal = $("modal-pick-set");
   const list = $("set-picker");
   list.innerHTML = "";
@@ -2085,7 +2097,8 @@ function openAddToSetModal() {
     const label = opt.set.type === "number"
       ? `${owner.name}'s ${opt.set.rank}s`
       : `${owner.name}'s ${SUIT_GLYPH[opt.set.suit]} run`;
-    info.innerHTML = `<strong>${escapeHTML(label)}</strong><span>${opt.set.cards.length} cards</span>`;
+    const action = opt.add && opt.swap ? "Add or swap" : (opt.swap ? "Swap wild" : "Add");
+    info.innerHTML = `<strong>${escapeHTML(label)}</strong><span>${escapeHTML(action)}</span>`;
     row.appendChild(info);
     const cardsEl = document.createElement("div");
     cardsEl.className = "set-row-cards";
@@ -2096,17 +2109,20 @@ function openAddToSetModal() {
     row.appendChild(cardsEl);
     const commit = () => {
       modal.classList.add("hidden");
-      const v = opt.validation;
-      if (opt.set.type === "number") {
-        finalizeAddition(opt.set, v.arrangement);
+      if (opt.add && opt.swap) {
+        showSwapOrAddChoice({
+          onSwap: () => finalizeSwap(opt.set, opt.swap.positionIndex, opt.naturalCardId),
+          onAdd: () => runAddArrangement(opt.set, opt.add),
+        });
+      } else if (opt.swap) {
+        finalizeSwap(opt.set, opt.swap.positionIndex, opt.naturalCardId);
       } else {
-        if (v.arrangements.length === 1) finalizeAddition(opt.set, v.arrangements[0]);
-        else chooseAdditionArrangement(v.arrangements, opt.set, (chosen) => finalizeAddition(opt.set, chosen));
+        runAddArrangement(opt.set, opt.add);
       }
     };
     const btn = document.createElement("button");
     btn.className = "pill primary";
-    btn.textContent = "Add";
+    btn.textContent = opt.swap && !opt.add ? "Swap" : "Add";
     btn.addEventListener("click", (ev) => { ev.stopPropagation(); commit(); });
     row.appendChild(btn);
     row.addEventListener("click", commit);
@@ -2124,80 +2140,19 @@ async function finalizeAddition(set, arrangement) {
   ui.selectedIds.clear();
   persist();
   renderAll();
+  tutorial.notify("add");
 }
 
-function openSwapModal() {
-  const me = currentPlayer(state);
-  if (!me.hasOpened) { toast("Open with your own set first."); return; }
-  const modal = $("modal-swap");
-  const list = $("swap-list");
-  list.innerHTML = "";
-  let any = false;
-  for (const s of state.table) {
-    for (let i = 0; i < s.cards.length; i++) {
-      const c = s.cards[i];
-      if (!c.isWild) continue;
-      // Determine required natural card.
-      const needRank = c.representsRank;
-      const needSuit = s.type === "run" ? c.representsSuit : null;
-      const naturalCard = me.hand.find(h => {
-        if (isWildcard(h, state.wildcardRank)) return false;
-        if (h.rank !== needRank) return false;
-        if (needSuit && h.suit !== needSuit) return false;
-        if (!needSuit) {
-          const existingSuits = new Set(s.cards.filter((cc, k) => k !== i && !cc.isWild).map(cc => cc.card.suit));
-          if (existingSuits.has(h.suit)) return false;
-        }
-        return true;
-      });
-      const row = document.createElement("div");
-      row.className = "swap-row";
-      const info = document.createElement("div");
-      info.className = "set-row-info";
-      const owner = state.players[s.ownerIndex];
-      const label = s.type === "number"
-        ? `${owner.name}'s ${s.rank}s`
-        : `${owner.name}'s ${SUIT_GLYPH[s.suit]} run`;
-      const need = s.type === "run"
-        ? `Needs ${needRank} of ${SUIT_GLYPH[needSuit]}`
-        : `Needs a ${needRank} of a missing suit`;
-      info.innerHTML = `<strong>${escapeHTML(label)}</strong><span>${escapeHTML(need)}</span>`;
-      row.appendChild(info);
-      const preview = document.createElement("div");
-      preview.className = "set-row-cards";
-      const wildPreview = renderCard(c.card, { wild: true, represents: { rank: needRank, suit: needSuit } });
-      preview.appendChild(wildPreview);
-      row.appendChild(preview);
-
-      const btn = document.createElement("button");
-      btn.className = "pill primary";
-      btn.textContent = naturalCard ? "Swap" : "Can't swap";
-      btn.disabled = !naturalCard;
-      btn.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        if (!naturalCard) return;
-        modal.classList.add("hidden");
-        const r = await online.applyOnlineOrLocal({
-          action: { type: "swap", setId: s.id, positionIndex: i, naturalCardId: naturalCard.id },
-          localApply: () => swapWildcard(state, s.id, i, naturalCard.id),
-        });
-        if (!r.ok) { toast(r.reason); return; }
-        ui.selectedIds.clear();
-        persist();
-        renderAll();
-      });
-      row.appendChild(btn);
-      list.appendChild(row);
-      any = true;
-    }
-  }
-  if (!any) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No wildcards on the table to swap.";
-    list.appendChild(empty);
-  }
-  modal.classList.remove("hidden");
+async function finalizeSwap(set, positionIndex, naturalCardId) {
+  const r = await online.applyOnlineOrLocal({
+    action: { type: "swap", setId: set.id, positionIndex, naturalCardId },
+    localApply: () => swapWildcard(state, set.id, positionIndex, naturalCardId),
+  });
+  if (!r.ok) { toast(r.reason); return; }
+  ui.selectedIds.clear();
+  persist();
+  renderAll();
+  tutorial.notify("swap");
 }
 
 function afterDiscard(result) {
@@ -2370,15 +2325,11 @@ function goMatchEnd() {
     tbody.appendChild(tr);
   }
   renderMatchEndHistory();
-  // Online v1 doesn't fold results into local profiles (each device would
-  // otherwise record every opponent under its own local store). Profiles stay
-  // a local-play feature for now.
-  if (online.isInSession()) {
-    const host = $("match-end-rewards");
-    if (host) host.innerHTML = "";
-  } else {
-    recordAndRenderRewards();
-  }
+  // Record this match into the local profile store and render rewards. For
+  // online play, recordAndRenderRewards folds in only the local user's seat
+  // (via onlyPlayerIdx) so opponents — whose stats live on their own devices —
+  // aren't double-counted here.
+  recordAndRenderRewards();
   buildConfetti();
   if (!online.isInSession()) discardSave();
 }

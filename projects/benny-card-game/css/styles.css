@@ -1282,18 +1282,18 @@ body.hand-dragging textarea {
 .rules-body li { margin-bottom: 4px; }
 .rules-body strong { color: var(--ink); }
 
-.set-picker, .swap-list {
+.set-picker {
   display: flex; flex-direction: column; gap: 10px;
   max-height: 60vh; overflow: auto;
   padding: 6px 0 12px;
 }
-.set-picker .set-row, .swap-list .swap-row {
+.set-picker .set-row {
   display: flex; gap: 8px; align-items: center;
   padding: 8px; border-radius: 12px;
   background: #f4f7f5; border: 1px solid rgba(0,0,0,0.06);
   cursor: pointer;
 }
-.set-picker .set-row:hover, .swap-list .swap-row:hover { background: #e7efeb; }
+.set-picker .set-row:hover { background: #e7efeb; }
 .set-row-info { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ink-soft); flex: 1; }
 .set-row-info strong { color: var(--ink); font-size: 14px; }
 .set-row-cards { display: flex; gap: 3px; }
