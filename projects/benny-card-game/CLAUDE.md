@@ -235,7 +235,7 @@ The drag also accepts the discard pile and other players' melds as drop targets,
 
 ### Auth
 
-Netlify Identity widget loaded as a classic script (`<script src=".../netlify-identity-widget.js">`) so `window.netlifyIdentity` exists before `main.js` (a deferred module) boots. `net.initIdentity()` wires `init` / `login` / `logout` events and resolves with the mapped user. JWTs are fetched per-request via `user.jwt()` and sent as `Authorization: Bearer …`; Netlify Functions resolve them via `context.clientContext.user`. The card-style preference is gated behind being signed in (so it follows the user across devices later, even though storage is still local for now).
+Netlify Identity widget is **self-hosted** at `assets/netlify-identity-widget.js` and loaded as a classic script (with `integrity="sha384-…"`) so `window.netlifyIdentity` exists before `main.js` (a deferred module) boots. The vendor CDN at `identity.netlify.com` doesn't serve `Access-Control-Allow-Origin`, so SRI + `crossorigin="anonymous"` on the CDN URL silently fails — self-hosting sidesteps that AND lets the SW pre-cache the widget for fast first paint. To refresh on a new widget release, re-run the curl + openssl block in [index.html](index.html) and bump the SW cache version. `net.initIdentity()` wires `init` / `login` / `logout` events and resolves with the mapped user. JWTs are fetched per-request via `user.jwt()` and sent as `Authorization: Bearer …`; Netlify Functions resolve them via `context.clientContext.user`. The card-style preference is gated behind being signed in.
 
 ### Backend (Netlify Functions + Neon Postgres)
 

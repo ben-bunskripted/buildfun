@@ -12,19 +12,22 @@
 <link rel="stylesheet" href="css/styles.css" />
 <!-- Netlify Identity widget — provides Google/email sign-in for Online mode.
      Loaded as a classic script so window.netlifyIdentity exists before the
-     deferred main.js module boots. Fails gracefully when offline.
+     deferred main.js module boots. Self-hosted (not loaded from
+     identity.netlify.com directly) because the CDN doesn't serve
+     Access-Control-Allow-Origin, which combined with `crossorigin=anonymous`
+     would silently block SRI'd loads. Self-hosting also means the SW can
+     pre-cache it so Online sign-in works on a slow first paint.
 
-     SRI pins the bytes we trust. If Netlify ships a new widget the script
-     will refuse to load — re-derive the hash with:
+     To refresh the widget when Netlify ships a new version:
        curl -fsSL https://identity.netlify.com/v1/netlify-identity-widget.js \
-         | openssl dgst -sha384 -binary | openssl base64 -A
-     and update both this integrity attribute and the CSP in netlify.toml
-     if any directive needs to change. `crossorigin="anonymous"` is
-     required so the browser performs SRI verification on the cross-origin
-     response. -->
-<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"
-        integrity="sha384-dy2tW8xkhLIj8lZR42MCwZhhDb2cCewZiw0uA65CMpdHiJzL+iubx7HzHcCXU2rW"
-        crossorigin="anonymous"></script>
+         -o projects/benny-card-game/assets/netlify-identity-widget.js
+       openssl dgst -sha384 -binary \
+         projects/benny-card-game/assets/netlify-identity-widget.js \
+         | openssl base64 -A
+     Paste the resulting hash into the integrity attribute below, bump the
+     CACHE version in sw.js, and deploy. -->
+<script src="assets/netlify-identity-widget.js"
+        integrity="sha384-dy2tW8xkhLIj8lZR42MCwZhhDb2cCewZiw0uA65CMpdHiJzL+iubx7HzHcCXU2rW"></script>
 </head>
 <body>
 <div id="app">
