@@ -31,6 +31,12 @@ let state = null;        // active match state (multiplayer/cpu) OR scoring stat
 let ui = {
   mode: "multiplayer",   // "multiplayer" | "cpu" | "scoring"
   selectedIds: new Set(),
+  // The user's preferred hand order, as a list of card IDs. Driven by drag-
+  // reorder and the Sort button. Re-applied to the hand on every render so
+  // that adopting server state in online mode (which overwrites the actor's
+  // hand each turn) doesn't reset their layout. Unknown IDs (e.g., a card
+  // just drawn) fall through to the end.
+  handOrder: [],
   // Multiplayer setup
   numPlayers: 3,
   playerNames: ["", "", "", ""],
@@ -1295,11 +1301,34 @@ function handViewerIdx() {
   return state.currentPlayerIndex;
 }
 
+// Reorder the player's hand in place to match `ui.handOrder` — the user's
+// preferred ordering of card IDs. IDs no longer in the hand are dropped; new
+// IDs (e.g., a just-drawn card) are appended. Updates ui.handOrder to the
+// resulting sequence so callers stay in sync. In online mode this is what
+// keeps the actor's drag-arranged hand stable across server state adoptions.
+function applyHandOrderPref(player) {
+  if (!player || !Array.isArray(player.hand)) return;
+  if (!ui.handOrder || ui.handOrder.length === 0) {
+    ui.handOrder = player.hand.map(c => c.id);
+    return;
+  }
+  const byId = new Map(player.hand.map(c => [c.id, c]));
+  const ordered = [];
+  for (const id of ui.handOrder) {
+    const c = byId.get(id);
+    if (c) { ordered.push(c); byId.delete(id); }
+  }
+  for (const c of byId.values()) ordered.push(c);
+  player.hand = ordered;
+  ui.handOrder = ordered.map(c => c.id);
+}
+
 function renderHand() {
   const hand = $("hand");
   hand.innerHTML = "";
   const me = state.players[handViewerIdx()];
   if (!me) return;
+  applyHandOrderPref(me);
   for (const c of me.hand) {
     const wild = isWildcard(c, state.wildcardRank);
     const el = renderCard(c, { wild });
@@ -1620,9 +1649,10 @@ function wireUp() {
   makeHandReorderable(
     $("hand"),
     (fromIndex, toIndex) => {
-      const me = currentPlayer(state);
+      const me = state.players[handViewerIdx()];
       const [moved] = me.hand.splice(fromIndex, 1);
       me.hand.splice(toIndex, 0, moved);
+      ui.handOrder = me.hand.map(c => c.id);
       renderHand();
     },
     {
@@ -1669,8 +1699,9 @@ function wireUp() {
 
   // Sort button
   $("sort-btn").addEventListener("click", () => {
-    const me = currentPlayer(state);
+    const me = state.players[handViewerIdx()];
     me.hand = [...me.hand].sort((a, b) => compareForSort(a, b, state.wildcardRank));
+    ui.handOrder = me.hand.map(c => c.id);
     renderHand();
   });
 
