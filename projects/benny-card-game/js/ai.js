@@ -511,47 +511,11 @@ function describePlay(arrangement) {
 
 // ---------- main entry ----------
 
-export function planTurn(state, difficulty) {
-  const actions = [];
+// Run the play/add loop, then (non-easy) one swap, then choose a discard.
+// `actions` already holds the chosen draw action (or is empty on the dealer's
+// opening turn). Mutates and returns `actions`.
+function planAfterDraw(state, actions, difficulty) {
   const wildRank = state.wildcardRank;
-  const isDealerOpening = state.dealerOpeningPending && state.currentPlayerIndex === state.dealerIndex;
-
-  if (!isDealerOpening) {
-    const top = topOfDiscard(state);
-    let takeDiscard = false;
-    if (top) {
-      const me = state.players[state.currentPlayerIndex];
-      if (isWildcard(top, wildRank) && difficulty !== "easy") {
-        takeDiscard = true;
-      } else if (difficulty !== "easy") {
-        // Could this card swap an already-placed wildcard back into our
-        // hand? If so it's worth ~15 points — almost always grab it.
-        const swap = findSwappableWildFor(top, state.table, wildRank);
-        if (swap && me.hasOpened) takeDiscard = true;
-        if (!takeDiscard) {
-          const before = enumerateNewSets(me.hand, wildRank, state.table).length;
-          const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
-          if (after > before) takeDiscard = true;
-        }
-        if (!takeDiscard && difficulty === "hard") {
-          const sameRank = me.hand.filter(c => c.rank === top.rank).length;
-          if (sameRank >= 1) takeDiscard = true;
-        }
-      }
-    }
-    if (takeDiscard) {
-      actions.push({ type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` });
-    } else {
-      actions.push({ type: "drawDeck", narration: "drew from the deck" });
-    }
-  }
-
-  if (difficulty === "easy" && randomInt(10) < 7) {
-    const d = chooseDiscard(virtualState(state, actions), "easy");
-    if (d) actions.push(d);
-    return actions;
-  }
-
   applyPlayAndAddLoop(state, actions, difficulty);
 
   if (difficulty !== "easy") {
@@ -575,4 +539,87 @@ export function planTurn(state, difficulty) {
   const d = chooseDiscard(virtualState(state, actions), difficulty);
   if (d) actions.push(d);
   return actions;
+}
+
+// Reasons (medium/hard) the top of the discard beats a blind deck draw: it's a
+// wildcard, it swaps a placed wild back into hand, it opens a new set, or
+// (hard) we already hold a copy of its rank.
+function wantsDiscardTop(state, top, difficulty) {
+  const wildRank = state.wildcardRank;
+  const me = state.players[state.currentPlayerIndex];
+  if (isWildcard(top, wildRank)) return true;
+  const swap = findSwappableWildFor(top, state.table, wildRank);
+  if (swap && me.hasOpened) return true;
+  const before = enumerateNewSets(me.hand, wildRank, state.table).length;
+  const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
+  if (after > before) return true;
+  if (difficulty === "hard") {
+    const sameRank = me.hand.filter(c => c.rank === top.rank).length;
+    if (sameRank >= 1) return true;
+  }
+  return false;
+}
+
+// True if `cardId` ends up on the table this turn (played, added, or swapped
+// in) rather than left in hand.
+function cardMelded(plan, cardId) {
+  for (const a of plan) {
+    if (a.type === "play" && a.arrangement.cards.some(c => c.card && c.card.id === cardId)) return true;
+    if (a.type === "add" && a.arrangement.added && a.arrangement.added.some(c => c.card && c.card.id === cardId)) return true;
+    if (a.type === "swap" && a.naturalCardId === cardId) return true;
+  }
+  return false;
+}
+
+// A discard-pile pickup is pointless ("dead even") when we don't actually meld
+// the card and then discard a card of the SAME RANK we already held — we'd just
+// be trading one rank-R card for an identical one (e.g. take K♥, bin K♠). The
+// literal same-card bounce is the special case where the discard IS the top.
+function pickupIsDeadEnd(state, top, plan) {
+  if (cardMelded(plan, top.id)) return false;
+  const last = plan[plan.length - 1];
+  if (!last || last.type !== "discard") return false;   // went out / no discard
+  if (last.cardId === top.id) return true;              // picked up, binned same card
+  const me = state.players[state.currentPlayerIndex];
+  const discarded = me.hand.find(c => c.id === last.cardId);
+  return !!discarded && discarded.rank === top.rank;
+}
+
+function planGoesOut(state, plan) {
+  const v = virtualState(state, plan);
+  return v.players[v.currentPlayerIndex].hand.length === 0;
+}
+
+export function planTurn(state, difficulty) {
+  const isDealerOpening = state.dealerOpeningPending && state.currentPlayerIndex === state.dealerIndex;
+  const deckDraw = () => ({ type: "drawDeck", narration: "drew from the deck" });
+
+  // Easy never mines the discard pile, and 70% of the time just draws and dumps.
+  if (difficulty === "easy") {
+    const actions = isDealerOpening ? [] : [deckDraw()];
+    if (randomInt(10) < 7) {
+      const d = chooseDiscard(virtualState(state, actions), "easy");
+      if (d) actions.push(d);
+      return actions;
+    }
+    return planAfterDraw(state, actions, "easy");
+  }
+
+  // Dealer's opening turn: no draw — straight to playing + discarding.
+  if (isDealerOpening) return planAfterDraw(state, [], difficulty);
+
+  // Consider the discard top, but only commit to it if the full forecast
+  // actually USES the card. Picking a card up and discarding the same card on
+  // the same turn is a wasted move — fall back to a deck draw. (A line that
+  // goes out is always kept, even if the leftover happens to be the top card.)
+  const top = topOfDiscard(state);
+  if (top && wantsDiscardTop(state, top, difficulty)) {
+    const takePlan = planAfterDraw(
+      state,
+      [{ type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` }],
+      difficulty,
+    );
+    if (planGoesOut(state, takePlan) || !pickupIsDeadEnd(state, top, takePlan)) return takePlan;
+  }
+  return planAfterDraw(state, [deckDraw()], difficulty);
 }
