@@ -395,8 +395,7 @@
         <div class="hand-actions">
           <button class="pill ghost" id="sort-btn">Sort hand</button>
           <button class="pill primary" id="play-set-btn" disabled>Play set</button>
-          <button class="pill" id="add-set-btn" disabled>Add to set</button>
-          <button class="pill" id="swap-btn" disabled>Swap wild</button>
+          <button class="pill" id="add-set-btn" disabled>Add</button>
           <button class="pill" id="discard-btn" disabled>Discard</button>
         </div>
       </div>
@@ -551,10 +550,10 @@
     </div>
   </div>
 
-  <!-- Modal: choose set to add to -->
+  <!-- Modal: choose set to add to / swap a wildcard in -->
   <div id="modal-pick-set" class="modal hidden" role="dialog" aria-modal="true">
     <div class="modal-inner">
-      <h3>Choose a set to add to</h3>
+      <h3>Choose a set</h3>
       <div class="set-picker" id="set-picker"></div>
       <div class="modal-actions">
         <button class="pill ghost" id="modal-pick-cancel">Cancel</button>
@@ -562,21 +561,10 @@
     </div>
   </div>
 
-  <!-- Modal: swap wildcard -->
-  <div id="modal-swap" class="modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-inner">
-      <h3>Swap a wildcard</h3>
-      <p class="muted">Pick a wildcard on the table. You must hold the natural card it represents.</p>
-      <div class="swap-list" id="swap-list"></div>
-      <div class="modal-actions">
-        <button class="pill ghost" id="modal-swap-cancel">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Drop-on-wildcard ambiguity: when a card is dropped onto a swappable
-       wildcard inside a meld and that same card would also be a legal
-       addition to the set, ask the player which one they meant. -->
+  <!-- Set-pick ambiguity: when the chosen card could either swap a wildcard
+       out of the set (returning the wild to your hand) or be added to the set,
+       ask the player which one they meant. Also used by the drag-onto-wildcard
+       gesture. -->
   <div id="modal-swap-or-add" class="modal hidden" role="dialog" aria-modal="true">
     <div class="modal-inner">
       <h3>Swap or add?</h3>
