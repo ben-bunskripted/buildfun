@@ -10,17 +10,36 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").then((reg) => {
       if (!reg) return;
 
+      // A reload mid-game discards uncommitted UI state (an in-progress card
+      // arrangement, a live drag, half-typed scores). On these screens we
+      // defer to the banner so the user picks the moment. Everywhere else
+      // (start, lobby, round/match end, profile) a reload is safe — local
+      // matches are persisted on every action and online state is
+      // server-authoritative — so we take the update silently.
+      function isBusy() {
+        const active = document.querySelector(".screen.active");
+        const id = active && active.id;
+        return id === "screen-play" || id === "screen-scoring"
+          || id === "screen-pass" || id === "screen-reveal";
+      }
+
+      // Tell the waiting SW to take over. The controllerchange listener below
+      // picks it up and reloads the page once it activates.
+      function applyUpdate(worker) {
+        worker.postMessage("SKIP_WAITING");
+      }
+
       function promptUpdate(worker) {
+        if (!isBusy()) {
+          applyUpdate(worker);
+          return;
+        }
         const banner = document.getElementById("update-banner");
         const refresh = document.getElementById("update-refresh-btn");
         const dismiss = document.getElementById("update-dismiss-btn");
         if (!banner || !refresh) return;
         banner.classList.remove("hidden");
-        refresh.onclick = () => {
-          // Tell the waiting SW to take over. The controllerchange listener
-          // below picks it up and reloads the page.
-          worker.postMessage("SKIP_WAITING");
-        };
+        refresh.onclick = () => applyUpdate(worker);
         if (dismiss) dismiss.onclick = () => banner.classList.add("hidden");
       }
 

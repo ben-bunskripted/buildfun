@@ -12,6 +12,14 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
+# The service worker is the update trigger for installed PWAs. Force a
+# revalidation on every fetch so the browser (notably iOS Safari, which
+# checks lazily) can't serve a stale sw.js and miss a new CACHE version.
+[[headers]]
+  for = "/projects/benny-card-game/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
 [[headers]]
   for = "/*"
   [headers.values]
