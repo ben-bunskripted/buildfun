@@ -1508,16 +1508,16 @@ function wireTopBarMenu(btnId, listId) {
   });
 }
 
-// "End game" and "Archive & leave" only make sense inside an online session.
-// "End game" is host-only. Toggled every time a menu opens so a state change
-// (e.g. host left the table) reflects immediately on the next open.
+// Online destructive action at the bottom of the menu. A participant sees
+// "Archive & leave"; a host sees "End game" — never both, so the action is
+// unambiguous. Both render in the danger colour. Re-evaluated every time the
+// menu opens so role changes reflect immediately.
 function syncOnlineMenuVisibility(list) {
   const inSession = online.isInSession();
   const isHost = online.isHost();
-  list.querySelectorAll(".online-only").forEach(el => {
-    el.classList.toggle("hidden", !inSession);
-  });
+  const archiveBtn = list.querySelector("[data-action='archive-online']");
   const endBtn = list.querySelector("[data-action='end-online']");
+  if (archiveBtn) archiveBtn.classList.toggle("hidden", !(inSession && !isHost));
   if (endBtn) endBtn.classList.toggle("hidden", !(inSession && isHost));
 }
 document.addEventListener("click", (e) => {
@@ -2902,22 +2902,22 @@ function buildResumableRow(r) {
   const wrap = document.createElement("div");
   wrap.className = "online-room-row-wrap";
 
-  // Trailing action panel — revealed by the swipe. Two buttons so the host
-  // can either end the whole game (destructive) or just step away.
+  // Trailing action panel — revealed by the swipe. Host sees "End" (closes
+  // the table for everyone); participants see "Archive" (drops just their
+  // seat). Showing only one keeps the swipe target unambiguous.
   const actions = document.createElement("div");
   actions.className = "online-room-actions";
-  const archiveBtn = document.createElement("button");
-  archiveBtn.className = "row-action archive";
-  archiveBtn.textContent = "Archive";
-  archiveBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmArchiveRow(r, wrap); });
-  actions.appendChild(archiveBtn);
+  const actionBtn = document.createElement("button");
   if (r.isHost) {
-    const endBtn = document.createElement("button");
-    endBtn.className = "row-action end";
-    endBtn.textContent = "End";
-    endBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmEndRow(r, wrap); });
-    actions.appendChild(endBtn);
+    actionBtn.className = "row-action end";
+    actionBtn.textContent = "End";
+    actionBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmEndRow(r, wrap); });
+  } else {
+    actionBtn.className = "row-action archive";
+    actionBtn.textContent = "Archive";
+    actionBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmArchiveRow(r, wrap); });
   }
+  actions.appendChild(actionBtn);
   wrap.appendChild(actions);
 
   const row = document.createElement("div");

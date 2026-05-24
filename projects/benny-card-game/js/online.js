@@ -136,7 +136,10 @@ export async function startGame() {
   if (ordered.length < 2) { cb.toast("Need at least 2 players."); return; }
   const names = ordered.map(p => p.name);
   const dealerIndex = randomInt(names.length);
-  const s = createMatch(names, dealerIndex, { mode: "multiplayer" });
+  // Tag the match as "online" so the profile screen + achievement evaluator
+  // bucket the result into its own per-player stats slice instead of folding
+  // it into the local multiplayer history.
+  const s = createMatch(names, dealerIndex, { mode: "online" });
   startNextRound(s);
   try {
     const res = await net.startGame(session.roomId, serialize(s));
