@@ -511,47 +511,11 @@ function describePlay(arrangement) {
 
 // ---------- main entry ----------
 
-export function planTurn(state, difficulty) {
-  const actions = [];
+// Run the play/add loop, then (non-easy) one swap, then choose a discard.
+// `actions` already holds the chosen draw action (or is empty on the dealer's
+// opening turn). Mutates and returns `actions`.
+function planAfterDraw(state, actions, difficulty) {
   const wildRank = state.wildcardRank;
-  const isDealerOpening = state.dealerOpeningPending && state.currentPlayerIndex === state.dealerIndex;
-
-  if (!isDealerOpening) {
-    const top = topOfDiscard(state);
-    let takeDiscard = false;
-    if (top) {
-      const me = state.players[state.currentPlayerIndex];
-      if (isWildcard(top, wildRank) && difficulty !== "easy") {
-        takeDiscard = true;
-      } else if (difficulty !== "easy") {
-        // Could this card swap an already-placed wildcard back into our
-        // hand? If so it's worth ~15 points — almost always grab it.
-        const swap = findSwappableWildFor(top, state.table, wildRank);
-        if (swap && me.hasOpened) takeDiscard = true;
-        if (!takeDiscard) {
-          const before = enumerateNewSets(me.hand, wildRank, state.table).length;
-          const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
-          if (after > before) takeDiscard = true;
-        }
-        if (!takeDiscard && difficulty === "hard") {
-          const sameRank = me.hand.filter(c => c.rank === top.rank).length;
-          if (sameRank >= 1) takeDiscard = true;
-        }
-      }
-    }
-    if (takeDiscard) {
-      actions.push({ type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` });
-    } else {
-      actions.push({ type: "drawDeck", narration: "drew from the deck" });
-    }
-  }
-
-  if (difficulty === "easy" && randomInt(10) < 7) {
-    const d = chooseDiscard(virtualState(state, actions), "easy");
-    if (d) actions.push(d);
-    return actions;
-  }
-
   applyPlayAndAddLoop(state, actions, difficulty);
 
   if (difficulty !== "easy") {
@@ -575,4 +539,70 @@ export function planTurn(state, difficulty) {
   const d = chooseDiscard(virtualState(state, actions), difficulty);
   if (d) actions.push(d);
   return actions;
+}
+
+// Reasons (medium/hard) the top of the discard beats a blind deck draw: it's a
+// wildcard, it swaps a placed wild back into hand, it opens a new set, or
+// (hard) we already hold a copy of its rank.
+function wantsDiscardTop(state, top, difficulty) {
+  const wildRank = state.wildcardRank;
+  const me = state.players[state.currentPlayerIndex];
+  if (isWildcard(top, wildRank)) return true;
+  const swap = findSwappableWildFor(top, state.table, wildRank);
+  if (swap && me.hasOpened) return true;
+  const before = enumerateNewSets(me.hand, wildRank, state.table).length;
+  const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
+  if (after > before) return true;
+  if (difficulty === "hard") {
+    const sameRank = me.hand.filter(c => c.rank === top.rank).length;
+    if (sameRank >= 1) return true;
+  }
+  return false;
+}
+
+// Did the plan just pick the card up and discard it again? Card ids are unique,
+// so a discard of `cardId` means it was never consumed by a play/add/swap
+// (those remove it from hand first).
+function planDiscards(plan, cardId) {
+  const last = plan[plan.length - 1];
+  return !!last && last.type === "discard" && last.cardId === cardId;
+}
+
+function planGoesOut(state, plan) {
+  const v = virtualState(state, plan);
+  return v.players[v.currentPlayerIndex].hand.length === 0;
+}
+
+export function planTurn(state, difficulty) {
+  const isDealerOpening = state.dealerOpeningPending && state.currentPlayerIndex === state.dealerIndex;
+  const deckDraw = () => ({ type: "drawDeck", narration: "drew from the deck" });
+
+  // Easy never mines the discard pile, and 70% of the time just draws and dumps.
+  if (difficulty === "easy") {
+    const actions = isDealerOpening ? [] : [deckDraw()];
+    if (randomInt(10) < 7) {
+      const d = chooseDiscard(virtualState(state, actions), "easy");
+      if (d) actions.push(d);
+      return actions;
+    }
+    return planAfterDraw(state, actions, "easy");
+  }
+
+  // Dealer's opening turn: no draw — straight to playing + discarding.
+  if (isDealerOpening) return planAfterDraw(state, [], difficulty);
+
+  // Consider the discard top, but only commit to it if the full forecast
+  // actually USES the card. Picking a card up and discarding the same card on
+  // the same turn is a wasted move — fall back to a deck draw. (A line that
+  // goes out is always kept, even if the leftover happens to be the top card.)
+  const top = topOfDiscard(state);
+  if (top && wantsDiscardTop(state, top, difficulty)) {
+    const takePlan = planAfterDraw(
+      state,
+      [{ type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` }],
+      difficulty,
+    );
+    if (planGoesOut(state, takePlan) || !planDiscards(takePlan, top.id)) return takePlan;
+  }
+  return planAfterDraw(state, [deckDraw()], difficulty);
 }
