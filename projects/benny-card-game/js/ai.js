@@ -560,12 +560,29 @@ function wantsDiscardTop(state, top, difficulty) {
   return false;
 }
 
-// Did the plan just pick the card up and discard it again? Card ids are unique,
-// so a discard of `cardId` means it was never consumed by a play/add/swap
-// (those remove it from hand first).
-function planDiscards(plan, cardId) {
+// True if `cardId` ends up on the table this turn (played, added, or swapped
+// in) rather than left in hand.
+function cardMelded(plan, cardId) {
+  for (const a of plan) {
+    if (a.type === "play" && a.arrangement.cards.some(c => c.card && c.card.id === cardId)) return true;
+    if (a.type === "add" && a.arrangement.added && a.arrangement.added.some(c => c.card && c.card.id === cardId)) return true;
+    if (a.type === "swap" && a.naturalCardId === cardId) return true;
+  }
+  return false;
+}
+
+// A discard-pile pickup is pointless ("dead even") when we don't actually meld
+// the card and then discard a card of the SAME RANK we already held — we'd just
+// be trading one rank-R card for an identical one (e.g. take K♥, bin K♠). The
+// literal same-card bounce is the special case where the discard IS the top.
+function pickupIsDeadEnd(state, top, plan) {
+  if (cardMelded(plan, top.id)) return false;
   const last = plan[plan.length - 1];
-  return !!last && last.type === "discard" && last.cardId === cardId;
+  if (!last || last.type !== "discard") return false;   // went out / no discard
+  if (last.cardId === top.id) return true;              // picked up, binned same card
+  const me = state.players[state.currentPlayerIndex];
+  const discarded = me.hand.find(c => c.id === last.cardId);
+  return !!discarded && discarded.rank === top.rank;
 }
 
 function planGoesOut(state, plan) {
@@ -602,7 +619,7 @@ export function planTurn(state, difficulty) {
       [{ type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` }],
       difficulty,
     );
-    if (planGoesOut(state, takePlan) || !planDiscards(takePlan, top.id)) return takePlan;
+    if (planGoesOut(state, takePlan) || !pickupIsDeadEnd(state, top, takePlan)) return takePlan;
   }
   return planAfterDraw(state, [deckDraw()], difficulty);
 }
