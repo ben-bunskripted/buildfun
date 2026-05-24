@@ -514,9 +514,11 @@ body {
   outline: none;
 }
 .top-bar-menu-list .menu-item:active { background: rgba(255,255,255,0.16); }
-/* Destructive menu items (End game) keep the same hover treatment but render
-   the label in the danger colour so the difference is obvious. */
+/* Destructive menu items (End game / Archive & leave) render in the danger
+   colour. Safe-exit items (Save & exit) get a soft green that reads clearly
+   against the dark navy menu panel without competing with the gold accents. */
 .top-bar-menu-list .menu-item.danger-item { color: var(--danger, #d96a5b); }
+.top-bar-menu-list .menu-item.safe-item { color: #6fd99e; }
 
 /* Non-button content inside the menu — currently the Card size picker. The
    segmented control is reskinned dark to match the rest of the menu (the
