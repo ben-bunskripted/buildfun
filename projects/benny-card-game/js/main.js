@@ -267,11 +267,20 @@ function buildStart() {
   });
 
   $("start-btn").addEventListener("click", onStartMatch);
-  $("tutorial-btn").addEventListener("click", onStartTutorial);
-  $("tutorial-foot-btn").addEventListener("click", onStartTutorial);
-  $("tutorial-hide-btn").addEventListener("click", () => {
-    savePrefs({ ...loadPrefs(), hideTutorial: true });
-    applyTutorialVisibility();
+  // Top promo bar: tutorial + how-to-play, shown until the user dismisses
+  // the tutorial via the footer.
+  $("tutorial-top-btn").addEventListener("click", onStartTutorial);
+  $("rules-top-btn").addEventListener("click", openRules);
+  // Footer tutorial control toggles between "Dismiss tutorial" (sets the
+  // hide pref, removes the top promo) and "Replay tutorial" (starts the
+  // walkthrough). State + label live in applyTutorialVisibility().
+  $("tutorial-foot-btn").addEventListener("click", () => {
+    if (loadPrefs().hideTutorial) {
+      onStartTutorial();
+    } else {
+      savePrefs({ ...loadPrefs(), hideTutorial: true });
+      applyTutorialVisibility();
+    }
   });
   applyTutorialVisibility();
 
@@ -376,8 +385,6 @@ function showModeBlock() {
   // Online has its own create/join buttons in the block — the generic
   // "Start match" button and tutorial link don't apply.
   setShown("start-btn", ui.mode !== "online");
-  setShown("tutorial-row", ui.mode !== "online" && !loadPrefs().hideTutorial);
-  setShown("tutorial-foot-btn", ui.mode !== "online");
 }
 
 // Card style/size only apply to modes that render cards, and in Online mode we
@@ -649,12 +656,14 @@ function startScoringMatch() {
 
 // ---------- Tutorial entry ----------
 function applyTutorialVisibility() {
-  const row = $("tutorial-row");
-  if (!row) return;
-  // Once the user picks "Hide", the tutorial row stays hidden across reloads.
-  // Clearing localStorage is the escape hatch — first-time onboarding doesn't
-  // need a second-class re-show affordance.
-  row.classList.toggle("hidden", !!loadPrefs().hideTutorial);
+  const dismissed = !!loadPrefs().hideTutorial;
+  // Top promo (tutorial + how-to-play): hidden once the user has dismissed.
+  const top = $("tutorial-top");
+  if (top) top.classList.toggle("hidden", dismissed);
+  // Footer control toggles between dismiss + replay so the user always has
+  // one tutorial-related action available.
+  const foot = $("tutorial-foot-btn");
+  if (foot) foot.textContent = dismissed ? "Replay tutorial" : "Dismiss tutorial";
 }
 
 function onStartTutorial() {
@@ -976,8 +985,53 @@ function renderPublicState() {
 
 // Apply one CPU action, then animate the visual delta. Returns the action
 // result so the caller can detect roundWon / failures.
+// Replace one hidden placeholder in player[idx].hand with the given real card.
+// No-ops if the card is already present by id, or if the hand has no hidden
+// slots to claim (e.g., local CPU mode where the hand is always real).
+function patchHiddenCardIntoHand(playerIdx, card) {
+  if (!card || !state || !Array.isArray(state.players)) return;
+  const p = state.players[playerIdx];
+  if (!p || !Array.isArray(p.hand)) return;
+  if (p.hand.some(h => h && h.id === card.id)) return;
+  const hiddenIdx = p.hand.findIndex(h => h && h.hidden);
+  if (hiddenIdx < 0) return;
+  p.hand[hiddenIdx] = card;
+}
+
+function patchActorHandFromAction(action, actorIdx) {
+  if (!action || typeof action !== "object") return;
+  switch (action.type) {
+    case "discard":
+      if (action.card) patchHiddenCardIntoHand(actorIdx, action.card);
+      break;
+    case "swap":
+      if (action.natural) patchHiddenCardIntoHand(actorIdx, action.natural);
+      break;
+    case "play": {
+      const cards = action.arrangement && action.arrangement.cards;
+      if (Array.isArray(cards)) for (const c of cards) if (c && c.card) patchHiddenCardIntoHand(actorIdx, c.card);
+      break;
+    }
+    case "add": {
+      const added = action.arrangement && action.arrangement.added;
+      if (Array.isArray(added)) for (const c of added) if (c && c.card) patchHiddenCardIntoHand(actorIdx, c.card);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 async function stepCpuAnimated(action) {
   const playerIdx = state.currentPlayerIndex;
+  // For online spectators the actor's hand is server-redacted to opaque
+  // placeholders. The server includes the real card identities in any action
+  // that moves a card out of the hand — splice them back in (replacing one
+  // hidden placeholder each) so the engine can find them by id and so the
+  // animation has a real card to fly. CPU-mode hands are already real; this
+  // no-ops because the cards are already present by id.
+  patchActorHandFromAction(action, playerIdx);
+
   // Capture pre-mutation rects — some sources disappear after the engine runs.
   const drawPileR = rectOf(document.getElementById("draw-pile"));
   const discardR = rectOf(document.querySelector("#discard-host > *") || document.getElementById("discard-pile"));
@@ -1579,29 +1633,35 @@ function wireUp() {
   );
 
   // Draw pile / discard pile
-  $("draw-pile").addEventListener("click", () => {
+  $("draw-pile").addEventListener("click", async () => {
     if (state.phase !== "mustDraw") return;
-    const r = drawFromDeck(state);
+    const r = await online.applyOnlineOrLocal({
+      action: { type: "drawDeck" },
+      localApply: () => drawFromDeck(state),
+    });
     if (!r.ok) toast(r.reason);
-    if (r.ok) online.record({ type: "drawDeck" });
     persist();
     renderAll();
     if (r.ok) tutorial.notify("drawDeck");
   });
-  $("discard-pile").addEventListener("click", () => {
+  $("discard-pile").addEventListener("click", async () => {
     if (state.phase === "mustDraw") {
-      const r = drawFromDiscard(state);
+      const r = await online.applyOnlineOrLocal({
+        action: { type: "drawDiscard" },
+        localApply: () => drawFromDiscard(state),
+      });
       if (!r.ok) toast(r.reason);
-      if (r.ok) online.record({ type: "drawDiscard" });
       persist();
       renderAll();
       return;
     }
     if (state.phase === "canAct" && ui.selectedIds.size === 1) {
       const id = [...ui.selectedIds][0];
-      const r = discard(state, id);
+      const r = await online.applyOnlineOrLocal({
+        action: { type: "discard", cardId: id },
+        localApply: () => discard(state, id),
+      });
       if (!r.ok) { toast(r.reason); return; }
-      online.record({ type: "discard", cardId: id });
       ui.selectedIds.clear();
       afterDiscard(r);
     }
@@ -1635,12 +1695,14 @@ function wireUp() {
 
   // Discard the selected card — same path as tapping the discard pile, but
   // surfaced as a button in the hand actions row for discoverability.
-  $("discard-btn").addEventListener("click", () => {
+  $("discard-btn").addEventListener("click", async () => {
     if (state.phase !== "canAct" || ui.selectedIds.size !== 1) return;
     const id = [...ui.selectedIds][0];
-    const r = discard(state, id);
+    const r = await online.applyOnlineOrLocal({
+      action: { type: "discard", cardId: id },
+      localApply: () => discard(state, id),
+    });
     if (!r.ok) { toast(r.reason); return; }
-    online.record({ type: "discard", cardId: id });
     ui.selectedIds.clear();
     afterDiscard(r);
   });
@@ -1720,10 +1782,12 @@ function wireUp() {
   });
 }
 
-function doPlace(arrangement) {
-  const r = placeNewSet(state, arrangement);
+async function doPlace(arrangement) {
+  const r = await online.applyOnlineOrLocal({
+    action: { type: "play", arrangement },
+    localApply: () => placeNewSet(state, arrangement),
+  });
   if (!r.ok) { toast(r.reason); return; }
-  online.record({ type: "play", arrangement });
   ui.selectedIds.clear();
   persist();
   renderAll();
@@ -1871,21 +1935,25 @@ function resolveDropTarget(clientX, clientY, cardEl) {
   return null;
 }
 
-function handleDropOnTarget(target, _cardEl) {
+async function handleDropOnTarget(target, _cardEl) {
   if (!state) return;
   if (target.kind === "discard") {
     // Must keep at least 1 card to discard; engine will refuse otherwise.
-    const r = discard(state, target.data.cardId);
+    const r = await online.applyOnlineOrLocal({
+      action: { type: "discard", cardId: target.data.cardId },
+      localApply: () => discard(state, target.data.cardId),
+    });
     if (!r.ok) { toast(r.reason); return; }
-    online.record({ type: "discard", cardId: target.data.cardId });
     ui.selectedIds.clear();
     afterDiscard(r);
     return;
   }
   if (target.kind === "swap") {
-    const r = swapWildcard(state, target.data.setId, target.data.positionIndex, target.data.naturalCardId);
+    const r = await online.applyOnlineOrLocal({
+      action: { type: "swap", setId: target.data.setId, positionIndex: target.data.positionIndex, naturalCardId: target.data.naturalCardId },
+      localApply: () => swapWildcard(state, target.data.setId, target.data.positionIndex, target.data.naturalCardId),
+    });
     if (!r.ok) { toast(r.reason); return; }
-    online.record({ type: "swap", setId: target.data.setId, positionIndex: target.data.positionIndex, naturalCardId: target.data.naturalCardId });
     ui.selectedIds.clear();
     persist();
     renderAll();
@@ -2004,10 +2072,12 @@ function openAddToSetModal() {
   modal.classList.remove("hidden");
 }
 
-function finalizeAddition(set, arrangement) {
-  const r = addToSet(state, set.id, arrangement);
+async function finalizeAddition(set, arrangement) {
+  const r = await online.applyOnlineOrLocal({
+    action: { type: "add", setId: set.id, arrangement },
+    localApply: () => addToSet(state, set.id, arrangement),
+  });
   if (!r.ok) { toast(r.reason); return; }
-  online.record({ type: "add", setId: set.id, arrangement });
   ui.selectedIds.clear();
   persist();
   renderAll();
@@ -2060,13 +2130,15 @@ function openSwapModal() {
       btn.className = "pill primary";
       btn.textContent = naturalCard ? "Swap" : "Can't swap";
       btn.disabled = !naturalCard;
-      btn.addEventListener("click", (ev) => {
+      btn.addEventListener("click", async (ev) => {
         ev.stopPropagation();
         if (!naturalCard) return;
         modal.classList.add("hidden");
-        const r = swapWildcard(state, s.id, i, naturalCard.id);
+        const r = await online.applyOnlineOrLocal({
+          action: { type: "swap", setId: s.id, positionIndex: i, naturalCardId: naturalCard.id },
+          localApply: () => swapWildcard(state, s.id, i, naturalCard.id),
+        });
         if (!r.ok) { toast(r.reason); return; }
-        online.record({ type: "swap", setId: s.id, positionIndex: i, naturalCardId: naturalCard.id });
         ui.selectedIds.clear();
         persist();
         renderAll();
@@ -2087,11 +2159,19 @@ function openSwapModal() {
 
 function afterDiscard(result) {
   persist();
+  // In online mode the server is authoritative for round-over and no-way-out
+  // detection — `state.phase === "roundOver"` is already set by the engine
+  // (round-win) or by the server's post-discard finalizeNoWayOut. The
+  // applyActionRemote flow already adopted the new state and called route(),
+  // so the screen has transitioned correctly. We just notify the tutorial
+  // and flag a no-way-out for the round-end banner.
+  if (online.isActive()) {
+    tutorial.notify("discard", { wonRound: state.phase === "roundOver" && state.roundWinner != null });
+    if (result.noWayOut) state.noWayOutTriggered = true;
+    return;
+  }
   tutorial.notify("discard", { wonRound: !!result.wonRound });
   if (result.wonRound) {
-    // Online: commit the round-over state so everyone sees the win, then the
-    // commit's local route lands us on the round-end screen.
-    if (online.isActive()) { online.commitTurn(); return; }
     goRoundEnd();
     return;
   }
@@ -2102,13 +2182,9 @@ function afterDiscard(result) {
     finalizeNoWayOut(state);
     persist();
     state.noWayOutTriggered = true;
-    if (online.isActive()) { online.commitTurn(); return; }
     goRoundEnd();
     return;
   }
-  // Online: hand the just-finished turn to the server; the poll/route flow
-  // takes the next player from here.
-  if (online.isActive()) { online.commitTurn(); return; }
   // Refresh the play screen so the just-discarded card disappears from the
   // hand and the new discard-pile top renders, before either kicking off a
   // CPU turn or transitioning to the pass screen. handViewerIdx keeps the

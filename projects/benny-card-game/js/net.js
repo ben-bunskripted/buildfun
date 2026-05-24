@@ -80,15 +80,19 @@ export function listMyRooms() { return api("my-rooms"); }
 export function joinRoom(roomId, password, displayName) {
   return api("join-room", { method: "POST", body: { roomId, password, displayName } });
 }
-export function startGame(roomId, state) { return api("start-game", { method: "POST", body: { roomId, state } }); }
+// Server-authoritative: host sends only the room id; the server deals from
+// the current room_seats and writes the canonical state.
+export function startGame(roomId) { return api("start-game", { method: "POST", body: { roomId } }); }
+// Apply a single action server-side. `payload` is { expectedSeq, action }.
+// Response includes the post-state redacted for the caller's seat, plus
+// `drawnCard` on drawDeck (actor only).
+export function applyAction(roomId, payload) { return api("apply-action", { method: "POST", body: { roomId, ...payload } }); }
+// Host control writes. `action` is "advanceRound" | "finishMatch".
+export function hostControl(roomId, payload) { return api("submit-turn", { method: "POST", body: { roomId, ...payload } }); }
 export function getRoom(roomId, since, wait) {
   const query = { roomId, since: since || 0 };
   if (wait) query.wait = "1";
   return api("get-room", { query });
-}
-export function submitTurn(roomId, payload) { return api("submit-turn", { method: "POST", body: { roomId, ...payload } }); }
-export function submitIntermediate(roomId, payload) {
-  return api("submit-turn", { method: "POST", body: { roomId, intermediate: true, ...payload } });
 }
 export function leaveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId } }); }
 export function archiveRoom(roomId) { return api("leave-room", { method: "POST", body: { roomId, archive: true } }); }

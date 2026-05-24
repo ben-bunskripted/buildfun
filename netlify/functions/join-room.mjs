@@ -6,6 +6,7 @@ import {
   db, getUser, json, parseBody, verifyPassword,
   countActiveRoomsForUser, MAX_ACTIVE_ROOMS_PER_USER,
 } from "./_lib.mjs";
+import { redactStateForSeat } from "./_engine.mjs";
 
 async function roomSnapshot(sql, roomId) {
   const seats = await sql`SELECT seat_index, uid, display_name, connected
@@ -41,12 +42,14 @@ export const handler = async (event, context) => {
       const game = await sql`SELECT seq, status, state, last_turn, current_seat FROM games WHERE room_id = ${code}`;
       const g = game[0];
       const inPlay = g && (g.status === "playing" || g.status === "finished");
+      const seat = mine[0].seat_index;
+      const redacted = inPlay && g.state ? redactStateForSeat(g.state, seat) : null;
       return json(200, {
         roomId: code, name: room.name, status: room.status, maxPlayers: room.max_players,
-        seat: mine[0].seat_index, isHost: room.host_uid === user.uid,
+        seat, isHost: room.host_uid === user.uid,
         seq: g ? Number(g.seq) : 0,
         currentSeat: g ? g.current_seat : 0,
-        state: inPlay ? (g.state || null) : null,
+        state: redacted,
         lastTurn: inPlay ? (g.last_turn || null) : null,
         players: await roomSnapshot(sql, code),
       });

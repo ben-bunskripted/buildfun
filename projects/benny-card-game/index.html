@@ -25,6 +25,16 @@
         <img class="start-hero" src="assets/logo-bg.png" alt="Benny — 14 rounds, 1 wildcard, endless strategy" />
       </a>
 
+      <!-- Top tutorial promo. Sits at the top of the start panel above the
+           mode tiles and config form. Visible until the user dismisses the
+           tutorial (then this whole row disappears; the footer below still
+           offers "Replay tutorial"). -->
+      <div id="tutorial-top" class="tutorial-top">
+        <button type="button" id="tutorial-top-btn" class="text-link">Try the tutorial</button>
+        <span class="tutorial-top-sep" aria-hidden="true">·</span>
+        <button type="button" id="rules-top-btn" class="text-link">How to play</button>
+      </div>
+
       <div id="resume-banner" class="resume-banner hidden">
         <div>
           <strong id="resume-banner-title">Resume match?</strong>
@@ -248,18 +258,20 @@
       </label>
 
       <button id="start-btn" class="pill primary big">Start match</button>
-      <div class="tutorial-row" id="tutorial-row">
-        <button type="button" id="tutorial-btn" class="text-link">Try the tutorial</button>
-        <button type="button" id="tutorial-hide-btn" class="text-link tutorial-hide" aria-label="Hide tutorial link">Hide</button>
-      </div>
-      <button type="button" id="rules-btn" class="text-link">How to play</button>
-      <button type="button" id="feedback-btn" class="text-link">Send feedback</button>
-      <button type="button" id="install-btn" class="text-link hidden">Install Benny</button>
-
-      <!-- Safety net: always-visible tutorial link at the bottom of the panel,
-           in case the user dismissed the prominent one near the Start button. -->
-      <button type="button" id="tutorial-foot-btn" class="text-link tutorial-foot">Replay tutorial</button>
       </div><!-- /#start-config-step -->
+
+      <!-- Persistent start-screen footer. Lives outside both pick/config
+           steps so it's always visible. The tutorial control is dynamic:
+           "Dismiss tutorial" while the top promo is showing, "Replay
+           tutorial" once the user has dismissed it. -->
+      <div class="start-footer">
+        <button type="button" id="rules-btn" class="text-link">How to play</button>
+        <span class="start-footer-sep" aria-hidden="true">·</span>
+        <button type="button" id="feedback-btn" class="text-link">Contact</button>
+        <span class="start-footer-sep" aria-hidden="true">·</span>
+        <button type="button" id="tutorial-foot-btn" class="text-link">Dismiss tutorial</button>
+        <button type="button" id="install-btn" class="text-link hidden">Install Benny</button>
+      </div>
     </div>
   </section>
 

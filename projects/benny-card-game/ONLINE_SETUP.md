@@ -94,14 +94,39 @@ when a newer `seq` arrives they **replay** `last_turn` through the same animatio
 engine the CPU uses, then adopt the authoritative state. Turn-based play makes
 the ~1.5s poll latency a non-issue, so there are no websockets to manage.
 
-## v1 limitations (deliberate)
+## Trust model (server-authoritative)
 
-- **Trust model:** the full state (including hands) is shared with every client.
-  Server-side move validation and hand redaction are planned follow-ups — both
-  are cheap later because `game.js`/`rules.js` are pure and importable in a
-  function.
-- **Minimal disconnect handling:** if a player drops, their turn simply waits.
-- **Host is the single authority** for advancing rounds and ending the match.
+The server holds the canonical state and applies every move via the same
+`game.js`/`rules.js` engine the client uses. Clients send typed actions
+(`drawDeck`, `drawDiscard`, `play`, `add`, `swap`, `discard`) through
+`/.netlify/functions/apply-action`; the server validates the actor's seat,
+the engine validates legality, and only then is the row updated. Every
+poll response redacts other players' hands and the deck to opaque
+placeholders — no client ever sees hidden info. The `drawnCard` from a deck
+draw is sent ONLY to the actor and never persisted to `last_turn`.
+
+Host control writes (round advance, match finish) go through
+`/.netlify/functions/submit-turn`; that endpoint accepts only those two
+actions and is host-only.
+
+### Migration from the v1 (client-authoritative) trust model
+
+The v2 protocol changes the state shape (hands/deck redacted) and the
+endpoint contract (per-action instead of full-state commits). In-progress
+games from v1 will throw on the next action. Wipe them once after deploying:
+
+```sql
+-- Run once via the Neon console or `netlify functions:invoke setup-db`-style
+-- shell. Cascades to room_seats + games.
+DELETE FROM rooms WHERE status IN ('lobby', 'playing');
+```
+
+Players hitting an already-deleted room get a friendly "room gone" toast.
+
+## Disconnect handling
+
+- **Minimal:** if a player drops mid-turn, their turn waits. The host can
+  Archive the table (Online tab → swipe row) to end the game for everyone.
 
 ## Troubleshooting
 
@@ -112,3 +137,4 @@ the ~1.5s poll latency a non-issue, so there are no websockets to manage.
 | 500 mentioning `NETLIFY_DATABASE_URL` / "connection string is not provided" | Netlify DB not enabled, or the site wasn't redeployed after enabling it (the env var is injected at deploy time). Re-trigger a deploy. |
 | Functions work but no tables | Run `/.netlify/functions/setup-db` once while signed in. |
 | Polls seem to return stale state | Make sure the deployed `sw.js` is v39+ (it bypasses `/.netlify/functions`). Bump the cache and refresh. |
+| Existing in-progress online game stuck after v2 deploy | Run the migration SQL above (`DELETE FROM rooms WHERE status IN ('lobby', 'playing')`). v1 state isn't compatible with the new server-authoritative protocol. |

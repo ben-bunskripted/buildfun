@@ -61,15 +61,18 @@ Online backend (at the repo root — not inside this directory):
 netlify.toml                # publish=".", functions dir, /api/* → /.netlify/functions/*
 netlify/functions/
 ├── _lib.mjs                # db() + getUser() + password hash + room-code maker
+├── _engine.mjs             # server-side engine wrapper: applyAction() + redactStateForSeat()
+│                           #   (re-exports browser engine from projects/benny-card-game/js/)
 ├── auth-sync.mjs           # POST: upsert users row from Identity JWT
 ├── create-room.mjs         # POST: host a new room (public/private, password optional)
 ├── join-room.mjs           # POST: take a seat in a room
 ├── list-rooms.mjs          # GET:  public lobby-state rooms
 ├── my-rooms.mjs            # GET:  signed-in user's active tables (resume affordance)
 ├── leave-room.mjs          # POST: drop a seat
-├── start-game.mjs          # POST: host transitions room "lobby" → "playing" (requires full roster)
-├── get-room.mjs            # GET:  poll endpoint, supports ?wait=1 long-poll
-├── submit-turn.mjs         # POST: final + intermediate commits; optimistic-seq concurrency
+├── start-game.mjs          # POST: host signal to deal; server shuffles + deals from room_seats
+├── get-room.mjs            # GET:  poll endpoint, supports ?wait=1 long-poll; returns redacted state
+├── apply-action.mjs        # POST: server-authoritative move commit; validates + applies via engine
+├── submit-turn.mjs         # POST: host control writes (advanceRound / finishMatch only)
 ├── end-game.mjs            # POST: host-only, hard-deletes the room (cascade)
 └── setup-db.mjs            # GET:  one-off schema bootstrap (idempotent)
 package.json                # @netlify/neon + drizzle-orm + drizzle-kit
@@ -252,32 +255,59 @@ Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:make
 
 ### Turn commits + optimistic concurrency
 
-`submit-turn` enforces an optimistic `expectedSeq`. Stale → 409 with the authoritative state attached, so the caller can adopt and re-route. Three commit flavors:
+Every game move goes through `apply-action.mjs` as a typed action
+(`drawDeck`, `drawDiscard`, `play`, `add`, `swap`, `discard`). The server
+holds the canonical state and applies each action through the same
+`game.js`/`rules.js` engine the client uses — clients never write state
+directly. The endpoint enforces:
 
-1. **Final turn commit** (current player) — full state + action list, advances `current_seat`.
-2. **Intermediate commit** (current player, `intermediate: true`) — bumps seq + persists mid-turn state for spectators, but **keeps `current_seat` where it is**. Action delta is *appended* to `games.last_turn.actions` (resetting if a different seat is current). This is what powers "spectators see plays as they happen" and also makes mid-turn refresh recoverable.
-3. **Host control write** — round advance / match finish, `lastTurn = null`.
+- Auth: caller must hold a seat in the room.
+- Turn: `seat === current_seat`.
+- Optimistic concurrency: `expectedSeq === games.seq`. Stale → 409 with the
+  caller's redacted state attached so they can adopt and retry.
 
-The client debounces intermediates by 250 ms in `online.js:scheduleIntermediate` so a flurry of actions (dragging several cards into one set) becomes one network write. Only the actor writes intermediates — host bypass would corrupt the action stream.
+Host control writes (round advance / match finish) live in `submit-turn.mjs`
+and only accept `{action: "advanceRound" | "finishMatch"}`. Same auth + seq
+checks; no general state writes.
+
+### Hand + deck redaction
+
+`_engine.mjs:redactStateForSeat(state, seat)` deep-clones the canonical state
+and replaces every other player's `hand` with same-length opaque
+placeholders (`{id: "hidden-...", hidden: true}`), and replaces `deck` the
+same way. The caller's own hand is left intact. Every endpoint that returns
+state runs through this — `get-room`, `apply-action`, `join-room` (rejoin),
+`submit-turn` (stale 409s). The drawn card from `drawDeck` is sent only on
+the actor's `apply-action` response (under `drawnCard`); it's never
+persisted in `last_turn` so spectators never see it.
 
 ### Replay (spectator side)
 
-When the poll loop notices `lastTurn.seat !== mySeat`, it routes the new action(s) through `replayRemote()`, which:
+When the poll loop notices `lastTurn.seat !== mySeat`, it routes the new
+action(s) through `replayRemote()`, which:
 
 1. Begins a turn on the local state mirror (only on the first delta of a new turn).
 2. Walks the new tail of `lastTurn.actions`, calling `cb.stepRemoteAction(action)` for each.
 3. Paces inter-action delays from the actor's `at` timestamps (capped at 1500 ms so an AFK actor doesn't freeze the spectator).
-4. Returns `{isDone, replayedCount, lastActionAt}` so the next intermediate only animates the new tail. Final discard flips `isDone` true; we then adopt the authoritative server state and `route()` (which may hand the turn to us).
+4. Returns `{isDone, replayedCount, lastActionAt}` so the next poll only animates the new tail. Final discard flips `isDone` true; we then adopt the authoritative server state and `route()` (which may hand the turn to us).
 
-`stepRemoteAction` reuses the same animated handlers the CPU runner uses, so an opponent's move looks identical to a Solo turn. The spectator screen is locked (`cb.beginSpectatorLock`) so misclicks don't fire local play actions during replay.
+The actor's hand is redacted on the spectator side, so before each engine
+apply `stepCpuAnimated` calls `patchActorHandFromAction(action, actorIdx)`.
+That function inspects the action payload (`discard.card`, `swap.natural`,
+`play.arrangement.cards`, `add.arrangement.added` — all *public-info* cards
+that are leaving the actor's hand) and splices each real card into the
+actor's hidden hand by replacing one placeholder. The engine can then find
+the card by id and animate normally. Cards that never become public (e.g.,
+the card drawn from the deck) stay hidden — the spectator sees a
+face-down ghost.
 
 ### Mid-turn refresh recovery (actor side)
 
-If the actor refreshes the page mid-turn, the server's `state` already reflects their progress (intermediates persist it) and `last_turn.actions` carries the partial action list. `online.js:route()` only calls `beginTurn(st)` when the engine is at `mustDraw` or `passing` — if the engine is already at `canAct` / `mustDiscard`, the rehydrated state is kept verbatim and the actor picks up where they left off.
-
-### Trust model (v1)
-
-State is shared unredacted; the current player (or host, for round advancement) is the only writer the server accepts. Hand contents are visible to anyone in the room. This is fine for friend-with-friend play but obviously not anti-cheat. Locking down later means moving validation server-side and redacting other players' hands in the poll payload — out of scope for v1.
+If the actor refreshes the page, their next `get-room` poll lands the server's
+current state (with their own hand visible) and the partial `last_turn.actions`
+list. Because every action is server-committed before the actor's UI updates,
+there's no client-only "in flight" state to recover — whatever the actor saw
+last is what the server stored.
 
 ### Lifecycle: archive, end-game, room cleanup
 
@@ -304,7 +334,7 @@ A signed-in user can hold at most `MAX_ACTIVE_ROOMS_PER_USER` (10) seats across 
 - Pure rule validation in `rules.js`; state mutation only in `game.js` / `scoring.js`.
 - `renderCard` and `renderCardBack` are the only places that touch card markup; everything else manipulates the `.card` div from the outside (classes, position).
 - `persist()` is called at every state transition in `main.js` — don't skip it on new code paths.
-- Online actions are recorded via `online.record({type, …})` *inside* each action handler in `main.js`, so the same code path serves local + online play. The recorder is a no-op outside of an online session.
+- Online actions go through `online.applyOnlineOrLocal({action, localApply})` inside each action handler in `main.js`. When online, the action is committed server-side via `apply-action.mjs` and the post-state (redacted for the caller) is adopted. When offline, the `localApply` callback runs the engine directly. Same code path serves both modes.
 - Toast errors via `toast(message)` for user-facing rule rejections; rule functions return `{ ok: false, reason }`.
 - CSS variables for theme; raw hex only where the value is one-off (and even those got swapped during the theme conversion).
 - No build step on the client. The functions directory uses `esbuild` (configured in `netlify.toml`) — that's Netlify's bundler, not ours, and there's still nothing to install before serving the static site.

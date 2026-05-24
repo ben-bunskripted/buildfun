@@ -1222,13 +1222,33 @@ body.hand-dragging textarea {
 }
 .text-link:hover { color: var(--accent-deep); }
 
-.tutorial-row {
+/* Top promo bar — "Try the tutorial · How to play", shown above the mode
+   tiles until the user dismisses the tutorial from the footer. */
+.tutorial-top {
   display: flex; justify-content: center; align-items: baseline;
-  gap: 4px;
+  gap: 8px;
+  margin: 4px 0 14px;
+  flex-wrap: wrap;
 }
-.tutorial-row .text-link { display: inline-block; margin-top: 6px; }
-.tutorial-hide { font-size: 12px; opacity: 0.7; }
-.tutorial-foot { font-size: 12px; opacity: 0.7; margin-top: 18px; }
+.tutorial-top.hidden { display: none; }
+.tutorial-top-sep { color: var(--ink-soft); opacity: 0.5; }
+
+/* Persistent footer at the bottom of the start panel — always visible on
+   both pick and config steps. Holds How to play, Contact, and the dynamic
+   Dismiss/Replay tutorial control. */
+.start-footer {
+  display: flex; justify-content: center; align-items: baseline;
+  gap: 8px;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  flex-wrap: wrap;
+}
+.start-footer .text-link { font-size: 13px; }
+.start-footer-sep { color: var(--ink-soft); opacity: 0.5; }
+/* Install Benny is opportunistic — keep it on its own row when present so
+   the three primary links stay together. */
+.start-footer #install-btn { flex-basis: 100%; text-align: center; }
 
 .feedback-textarea {
   width: 100%; min-height: 110px; resize: vertical; font-family: inherit;
