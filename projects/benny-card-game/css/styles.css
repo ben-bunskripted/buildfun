@@ -1507,7 +1507,25 @@ body.hand-dragging textarea {
 }
 .online-room-info { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
 .online-room-info strong { font-size: 14px; }
-.online-room-info span { color: var(--ink-soft); }
+.online-room-info span { color: var(--ink-soft); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* "Your turn" call-out — gold pill with a subtle ring so the row jumps out
+   in a list of otherwise-waiting tables. The whole row picks up an accent
+   border + soft tint when is-my-turn is set. */
+.online-room-row.is-my-turn {
+  background: #fff8e6;
+  border-color: var(--gold-deep, #c9963a);
+  box-shadow: 0 0 0 1px var(--gold-deep, #c9963a) inset;
+}
+.online-room-info .turn-pill {
+  background: var(--gold, #f5c451);
+  color: #3a2a08;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
 
 /* Lobby screen — also rendered inside .card-panel (white background). */
 #mode-online .muted,

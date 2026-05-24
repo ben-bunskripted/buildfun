@@ -368,7 +368,7 @@ function showModeBlock() {
   }
   if (ui.mode === "online") refreshOnlineModeBlock();
   // Per-mode settings visibility:
-  //  - Animate CPU moves only makes sense with a CPU opponent (Solo vs CPU).
+  //  - Animate CPU moves only makes sense with a CPU opponent (Solo).
   //  - Scoring mode renders no cards, so card style/size are irrelevant.
   const setShown = (id, shown) => $(id) && $(id).classList.toggle("hidden", !shown);
   setShown("field-animate-cpu", ui.mode === "cpu");
@@ -568,7 +568,7 @@ function onStartMatch() {
   start();
 }
 
-const MODE_TITLES = { multiplayer: "Multiplayer", cpu: "Solo vs CPU", scoring: "Scoring", online: "Online" };
+const MODE_TITLES = { multiplayer: "Multiplayer", cpu: "Solo", scoring: "Scoring", online: "Online" };
 
 // Simple modal-confirm wrapper. Pulls in the static markup defined in index.html.
 function showConfirm({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", onConfirm }) {
@@ -752,7 +752,7 @@ function routeTurnStart() {
     renderAll();
     return;
   }
-  // Solo vs CPU has no device to pass — drop the human straight into play.
+  // Solo has no device to pass — drop the human straight into play.
   if (state.mode === "cpu" && p.kind === "human") {
     beginTurn(state);
     ui.selectedIds.clear();
@@ -2921,15 +2921,19 @@ function buildResumableRow(r) {
   wrap.appendChild(actions);
 
   const row = document.createElement("div");
-  row.className = "online-room-row";
+  row.className = "online-room-row" + (r.isMyTurn ? " is-my-turn" : "");
   const info = document.createElement("div");
   info.className = "online-room-info";
   const statusLabel = r.status === "playing" ? "in progress" : "in lobby";
-  info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
+  // When it's the local user's turn, the meta line leads with a "Your turn"
+  // pill so it's the first thing the eye lands on. The whole row also picks
+  // up the .is-my-turn class for the accent border + tint.
+  const turnPill = r.isMyTurn ? `<span class="turn-pill">Your turn</span>` : "";
+  info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${turnPill}${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
   row.appendChild(info);
   const btn = document.createElement("button");
   btn.className = "pill primary";
-  btn.textContent = "Rejoin";
+  btn.textContent = r.isMyTurn ? "Play" : "Rejoin";
   btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
   row.appendChild(btn);
   wrap.appendChild(row);

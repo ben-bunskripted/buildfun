@@ -11,7 +11,7 @@ Pick one from the start screen:
 
 - **Multiplayer** — the classic hot-seat experience. The device passes
   between humans; each turn is gated by a "Show hand" screen.
-- **Solo vs CPU** — one human plus 1–3 CPU opponents. Each opponent has
+- **Solo** — one human plus 1–3 CPU opponents. Each opponent has
   its own difficulty (Easy / Medium / Hard). CPU turns either animate
   on the table or pop a recap card you tap through — configurable.
 - **Scoring only** — companion for in-real-life play. The app deals

@@ -106,7 +106,7 @@ function buildSteps() {
       text: "Your opponent is the dealer this round, so they go first with 8 cards. Tap Watch — you'll see a recap of their turn, then pick up your own hand.",
       buttonLabel: "Watch",
       onAdvance: () => callbacks.beginGameplay(),
-      // Solo vs CPU drops the human straight onto the play screen (no pass
+      // Solo drops the human straight onto the play screen (no pass
       // screen), firing "showHand" once their hand is dealt. Wait for that so
       // the next coach lands on the live play screen.
       awaitEvent: "showHand",

@@ -22,7 +22,7 @@ export const PLAY_MODES = ["multiplayer", "cpu", "online"];
 
 export const MODE_LABELS = {
   multiplayer: "Multiplayer",
-  cpu: "Solo vs CPU",
+  cpu: "Solo",
   scoring: "Scoring",
   online: "Online",
 };

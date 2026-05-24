@@ -269,7 +269,7 @@ When the poll loop notices `lastTurn.seat !== mySeat`, it routes the new action(
 3. Paces inter-action delays from the actor's `at` timestamps (capped at 1500 ms so an AFK actor doesn't freeze the spectator).
 4. Returns `{isDone, replayedCount, lastActionAt}` so the next intermediate only animates the new tail. Final discard flips `isDone` true; we then adopt the authoritative server state and `route()` (which may hand the turn to us).
 
-`stepRemoteAction` reuses the same animated handlers the CPU runner uses, so an opponent's move looks identical to a Solo-vs-CPU turn. The spectator screen is locked (`cb.beginSpectatorLock`) so misclicks don't fire local play actions during replay.
+`stepRemoteAction` reuses the same animated handlers the CPU runner uses, so an opponent's move looks identical to a Solo turn. The spectator screen is locked (`cb.beginSpectatorLock`) so misclicks don't fire local play actions during replay.
 
 ### Mid-turn refresh recovery (actor side)
 

@@ -4,7 +4,7 @@ Benny's online mode runs entirely on Netlify: the static frontend (unchanged,
 no build step) talks to a small **Netlify Functions** API, which reads/writes a
 **Netlify DB** (Neon Postgres). Sign-in is **Netlify Identity** (Google + email).
 
-Local play (Multiplayer / Solo vs CPU / Scoring) needs none of this and keeps
+Local play (Multiplayer / Solo / Scoring) needs none of this and keeps
 working with zero configuration. The steps below only enable the **Online** tab.
 
 ---

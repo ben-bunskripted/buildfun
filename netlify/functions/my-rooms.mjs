@@ -16,9 +16,11 @@ export const handler = async (event, context) => {
   try {
     const rows = await sql`
       SELECT r.id, r.name, r.status, r.max_players, r.host_uid, s.seat_index,
+        g.current_seat,
         (SELECT COUNT(*)::int FROM room_seats s2 WHERE s2.room_id = r.id) AS players
       FROM rooms r
       JOIN room_seats s ON s.room_id = r.id AND s.uid = ${user.uid}
+      LEFT JOIN games g ON g.room_id = r.id
       WHERE r.status != 'finished'
       ORDER BY r.updated_at DESC`;
     const rooms = rows.map(r => ({
@@ -26,6 +28,8 @@ export const handler = async (event, context) => {
       name: r.name,
       status: r.status,
       mySeat: r.seat_index,
+      currentSeat: r.current_seat,
+      isMyTurn: r.status === "playing" && r.current_seat === r.seat_index,
       isHost: r.host_uid === user.uid,
       players: r.players,
       maxPlayers: r.max_players,
