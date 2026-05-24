@@ -1624,16 +1624,7 @@ function wireUp() {
     const cards = [...ui.selectedIds].map(id => me.hand.find(c => c.id === id)).filter(Boolean);
     const v = validateNewSet(cards, state.wildcardRank);
     if (!v.ok) { toast(v.reason); return; }
-    if (v.type === "number") {
-      doPlace({ type: "number", rank: v.rank, cards: v.cards });
-    } else {
-      const arrangements = v.arrangements;
-      if (arrangements.length === 1) {
-        doPlace({ type: "run", ...arrangements[0] });
-      } else {
-        chooseArrangement(arrangements, (chosen) => doPlace({ type: "run", ...chosen }));
-      }
-    }
+    playValidatedNewSet(v);
   });
 
   // Add to set
@@ -1739,6 +1730,22 @@ function doPlace(arrangement) {
   tutorial.notify("playSet");
 }
 
+// Shared between the "Play set" button and the multi-card drag-to-own-area
+// drop handler. Caller must have already validated the selection via
+// validateNewSet — `v` is the result.
+function playValidatedNewSet(v) {
+  if (v.type === "number") {
+    doPlace({ type: "number", rank: v.rank, cards: v.cards });
+    return;
+  }
+  const arrangements = v.arrangements;
+  if (arrangements.length === 1) {
+    doPlace({ type: "run", ...arrangements[0] });
+  } else {
+    chooseArrangement(arrangements, (chosen) => doPlace({ type: "run", ...chosen }));
+  }
+}
+
 function chooseArrangement(arrangements, onPick) {
   const modal = $("modal-wild-choice");
   $("modal-wild-title").textContent = "Use wildcard as…";
@@ -1797,7 +1804,29 @@ function resolveDropTarget(clientX, clientY, cardEl) {
   if (state.phase !== "canAct" && state.phase !== "mustDiscard") return null;
   const me = currentPlayer(state);
   if (!me) return null;
-  const card = me.hand.find(c => c.id === cardEl.dataset.cardId);
+  const draggedId = cardEl.dataset.cardId;
+
+  // Multi-card mode: when the player has ≥2 cards selected AND is dragging
+  // one of them, treat the gesture as "play these as a new set". The only
+  // legal landing zone is the player's own meld row (`.is-current`), and
+  // only when the selection validates via the same rules the "Play set"
+  // button uses. We bypass the single-card targets entirely — a multi-card
+  // drag never adds-to-set / swaps / discards in one motion.
+  if (ui.selectedIds.size >= 2 && ui.selectedIds.has(draggedId)) {
+    const els = document.elementsFromPoint(clientX, clientY);
+    for (const el of els) {
+      const row = el.closest && el.closest("#all-melds .other-player.is-current");
+      if (!row) continue;
+      const cards = [...ui.selectedIds].map(id => me.hand.find(c => c.id === id)).filter(Boolean);
+      if (cards.length < 2) return null;
+      const v = validateNewSet(cards, state.wildcardRank);
+      if (!v.ok) return null;
+      return { kind: "play-set", el: row, data: { validation: v } };
+    }
+    return null;
+  }
+
+  const card = me.hand.find(c => c.id === draggedId);
   if (!card) return null;
 
   const els = document.elementsFromPoint(clientX, clientY);
@@ -1871,6 +1900,13 @@ function handleDropOnTarget(target, _cardEl) {
       onSwap: () => handleDropOnTarget({ kind: "swap", data: target.data }, _cardEl),
       onAdd: () => runAddDrop(target),
     });
+    return;
+  }
+  if (target.kind === "play-set") {
+    // The selection was validated when the drop target was resolved on the
+    // last pointermove. Re-running the engine here would catch any race
+    // where state changed mid-drag (rare but cheap to guard against).
+    playValidatedNewSet(target.data.validation);
     return;
   }
 }

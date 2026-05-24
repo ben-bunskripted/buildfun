@@ -10,9 +10,12 @@
 // safe to use once a game is in progress — lobby roster changes don't bump
 // seq, so callers must still short-poll while status is "lobby".
 //
-// Trust model: state is sent unredacted.
+// Server-authoritative trust model: `state` is redacted before send. The
+// caller sees their own hand verbatim; every other player's hand and the
+// deck are replaced with same-length opaque placeholders.
 
 import { db, getUser, json } from "./_lib.mjs";
+import { redactStateForSeat } from "./_engine.mjs";
 
 const LONG_POLL_MS = 9000;
 const LONG_POLL_STEP_MS = 600;
@@ -35,6 +38,7 @@ export const handler = async (event, context) => {
       FROM room_seats WHERE room_id = ${code} ORDER BY seat_index`;
     const players = seatRows.map(s => ({ seat: s.seat_index, uid: s.uid, name: s.display_name, connected: s.connected }));
     const mySeatRow = seatRows.find(s => s.uid === user.uid);
+    const mySeat = mySeatRow ? mySeatRow.seat_index : null;
 
     let g;
     {
@@ -63,13 +67,15 @@ export const handler = async (event, context) => {
       status: g.status || room.status,
       maxPlayers: room.max_players,
       isHost: room.host_uid === user.uid,
-      seat: mySeatRow ? mySeatRow.seat_index : null,
+      seat: mySeat,
       players,
       seq,
       currentSeat: g.current_seat,
     };
     if (seq > since) {
-      out.state = g.state || null;
+      // Redact state for the caller. Players with no seat (shouldn't happen
+      // because join-room is required) get a fully-redacted view.
+      out.state = g.state ? redactStateForSeat(g.state, mySeat == null ? -1 : mySeat) : null;
       out.lastTurn = g.last_turn || null;
     }
     return json(200, out);

@@ -645,6 +645,14 @@ body.cpu-animating .hand .card {
   border-radius: var(--card-radius);
   z-index: 2;
 }
+/* Multi-card "play as new set" hover: dragging ≥2 selected cards over the
+   player's own row lights up the whole row in gold so it's clear the drop
+   creates a new meld (rather than adding to an existing one). */
+#all-melds .other-player.is-drop-hover {
+  border-color: rgba(245,196,81,0.95);
+  box-shadow: 0 0 0 2px rgba(245,196,81,0.55) inset, 0 0 18px rgba(245,196,81,0.25);
+  background: rgba(245,196,81,0.10);
+}
 .other-player-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px;
