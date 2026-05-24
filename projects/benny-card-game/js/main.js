@@ -2370,15 +2370,11 @@ function goMatchEnd() {
     tbody.appendChild(tr);
   }
   renderMatchEndHistory();
-  // Online v1 doesn't fold results into local profiles (each device would
-  // otherwise record every opponent under its own local store). Profiles stay
-  // a local-play feature for now.
-  if (online.isInSession()) {
-    const host = $("match-end-rewards");
-    if (host) host.innerHTML = "";
-  } else {
-    recordAndRenderRewards();
-  }
+  // Record this match into the local profile store and render rewards. For
+  // online play, recordAndRenderRewards folds in only the local user's seat
+  // (via onlyPlayerIdx) so opponents — whose stats live on their own devices —
+  // aren't double-counted here.
+  recordAndRenderRewards();
   buildConfetti();
   if (!online.isInSession()) discardSave();
 }
