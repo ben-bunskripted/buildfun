@@ -1588,6 +1588,32 @@ body.hand-dragging textarea {
   color: var(--ink); font-weight: 600;
 }
 .lobby-player.is-disconnected { opacity: 0.5; }
+.lobby-player.is-away:not(.is-disconnected) { opacity: 0.65; }
+.lobby-player-name { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Presence dot — used both in the lobby roster and on in-game opponent rows.
+   Green when the seat polled in the last ~20s, grey otherwise. */
+.presence-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 6px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.presence-dot.is-online {
+  background: #3ea566;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 0 6px rgba(62, 165, 102, 0.55);
+}
+.presence-dot.is-away { background: #9aa3ad; }
+.presence-away {
+  display: inline-block;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted, #9aa3ad);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.other-player.is-opponent-away { opacity: 0.7; }
 .lobby-player.is-empty {
   background: transparent;
   border: 1px dashed rgba(0, 0, 0, 0.18);

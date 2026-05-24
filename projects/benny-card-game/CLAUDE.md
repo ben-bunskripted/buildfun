@@ -243,13 +243,25 @@ Tables (schema lives in ONLINE_SETUP.md §3; create once via the Neon SQL Editor
 
 - `users (uid PK, display_name, created_at)` — populated by `auth-sync` on first sign-in; canonical source for seat display names (see `_lib.mjs:canonicalDisplayName`).
 - `rooms (id PK = join code, name, host_uid, visibility, password_hash?, status, max_players, …)`. `password_hash` is PBKDF2-SHA256 / 210k iterations (`_lib.mjs:hashPassword`); the legacy single-round-SHA-256 format is still accepted by `verifyPassword` for any pre-cutover rows.
-- `room_seats (room_id, seat_index, uid, display_name, connected, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored.
+- `room_seats (room_id, seat_index, uid, display_name, connected, last_seen_at, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored. `last_seen_at` is bumped by every `get-room` poll and powers the presence indicator (see "Presence" below).
 - `games (room_id PK, seq, current_seat, status, state JSONB, last_turn JSONB, updated_at)`. State is server-authoritative; reads through `get-room` / `apply-action` are always redacted for the caller's seat.
 - `rate_limit_log (uid, endpoint, ts)` — backs `_lib.mjs:rateLimit`. Sliding-window per-uid/per-endpoint counter; budgets defined in `_lib.mjs:RATE_BUDGETS`.
 
 Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:makeRoomCode`.
 
 `@netlify/neon` is the SQL client. Choosing it (vs `@netlify/database`) is what tells Netlify to provision the database and inject `NETLIFY_DATABASE_URL` on deploy — `db()` in `_lib.mjs` lazily calls `neon()` which reads that env var.
+
+### Presence
+
+Every `get-room` poll doubles as a heartbeat. The endpoint bumps the caller's
+`room_seats.last_seen_at = now()` (after the long-poll wait, so the response
+reflects the just-bumped timestamp) and returns each seat tagged with
+`online` (last seen within 20s) plus the ISO `lastSeenAt`. The client renders
+a green/grey dot in the lobby roster and on in-game opponent rows; offline
+seats also get a small "away" / "away 2m" / "away 1h" label and the row
+fades to ~65% opacity. Self is never decorated (you're obviously looking
+at the page). Presence is purely a UX signal — it doesn't gate any
+server-side authorization, which still keys off seat membership and `connected`.
 
 ### Polling (`get-room` + long-poll)
 

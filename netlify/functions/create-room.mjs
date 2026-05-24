@@ -62,7 +62,10 @@ export const handler = async (event, context) => {
       seq: 0,
       seat: 0,
       isHost: true,
-      players: [{ seat: 0, uid: user.uid, name: seatName, connected: true }],
+      players: [{
+        seat: 0, uid: user.uid, name: seatName, connected: true,
+        online: true, lastSeenAt: new Date().toISOString(),
+      }],
     });
   } catch (err) {
     return json(500, { error: String(err && err.message || err) });

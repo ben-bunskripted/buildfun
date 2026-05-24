@@ -1182,6 +1182,12 @@ function renderTopBar() {
 function renderAllMelds() {
   const wrap = $("all-melds");
   wrap.innerHTML = "";
+  // Online roster keyed by seat index — used to render per-opponent presence
+  // (dot + "away" label) on each row. Player index in state equals seat_index
+  // (see start-game.mjs), so this lookup is a direct index.
+  const rosterBySeat = online.isActive()
+    ? Object.fromEntries((online.players() || []).map(rp => [rp.seat, rp]))
+    : null;
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i];
     const row = document.createElement("div");
@@ -1199,7 +1205,12 @@ function renderAllMelds() {
       : state.mode === "cpu"
         ? p.kind === "human"
         : i === state.currentPlayerIndex;
-    name.textContent = isYou ? `${p.name} (you)` : p.name;
+    // Opponents in online mode get a presence indicator (dot + "away" label
+    // when offline). Skip self — they're obviously online if they're looking.
+    const rosterEntry = rosterBySeat && !isYou ? rosterBySeat[i] : null;
+    if (rosterEntry && rosterEntry.online === false) row.classList.add("is-opponent-away");
+    const presence = rosterEntry ? presenceMarkup(rosterEntry) : "";
+    name.innerHTML = `${presence}<span class="player-name-text">${escapeHTML(isYou ? `${p.name} (you)` : p.name)}</span>`;
     if (i === state.dealerIndex) {
       const chip = document.createElement("span");
       chip.className = "dealer-chip";
@@ -2890,7 +2901,7 @@ function initOnline() {
     clearSelection: () => ui.selectedIds.clear(),
     beginSpectatorLock: () => document.body.classList.add("cpu-animating"),
     endSpectatorLock: () => document.body.classList.remove("cpu-animating"),
-    onRoster: renderLobbyRoster,
+    onRoster: handleOnlineRoster,
     onRoomGone: handleOnlineRoomGone,
   });
 
@@ -3324,6 +3335,47 @@ function disambiguatePlayerLabels(players) {
   return labels;
 }
 
+// Format presence as a short "away" label. Returns "" if the seat is online.
+// Otherwise: "away" for < 1 min, "away Nm" up to an hour, then "away Nh".
+// Reads `lastSeenAt` (ISO string) from the server response; missing on rows
+// from older deploys, in which case we fall back to a plain "away".
+function presenceLabel(p) {
+  if (p && p.online) return "";
+  if (!p || !p.lastSeenAt) return "away";
+  const ageMs = Date.now() - new Date(p.lastSeenAt).getTime();
+  const mins = Math.floor(ageMs / 60_000);
+  if (mins < 1) return "away";
+  if (mins < 60) return `away ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `away ${hrs}h`;
+}
+
+// Builds the inline presence markup (dot + optional "away" label) used both
+// in the lobby roster and on in-game opponent rows.
+function presenceMarkup(p, { dotOnly = false } = {}) {
+  // `online` may be undefined on snapshots from older server deploys — treat
+  // as online so we don't falsely fade everyone.
+  const isOnline = p && p.online !== false;
+  const dot = `<span class="presence-dot ${isOnline ? "is-online" : "is-away"}" title="${isOnline ? "Online" : "Away"}" aria-hidden="true"></span>`;
+  if (isOnline || dotOnly) return dot;
+  return `${dot}<span class="presence-away">${escapeHTML(presenceLabel(p))}</span>`;
+}
+
+// Every server poll delivers a fresh roster (including per-seat presence).
+// In the lobby we re-render the roster panel; once in play we re-render the
+// opponent rows so the green/grey presence dots stay live without waiting
+// for a new turn to trigger renderAll().
+function handleOnlineRoster(players, server) {
+  if (server && server.status === "lobby") {
+    renderLobbyRoster(players, server);
+    return;
+  }
+  const playScreen = $("screen-play");
+  if (state && playScreen && playScreen.classList.contains("active")) {
+    renderAllMelds();
+  }
+}
+
 function renderLobbyRoster(players, server) {
   const list = $("lobby-player-list");
   if (!list) return;
@@ -3333,11 +3385,13 @@ function renderLobbyRoster(players, server) {
   const labels = disambiguatePlayerLabels(ordered);
   for (const p of ordered) {
     const row = document.createElement("div");
-    row.className = "lobby-player" + (p.connected ? "" : " is-disconnected");
+    const isAway = p.online === false;
+    row.className = "lobby-player" + (p.connected ? "" : " is-disconnected") + (isAway ? " is-away" : "");
     const tags = [];
     if (p.seat === 0) tags.push("host");
     if (p.seat === online.mySeat()) tags.push("you");
-    row.innerHTML = `<span>${escapeHTML(labels[p.seat])}</span>${tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : ""}`;
+    const tagMarkup = tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : "";
+    row.innerHTML = `<span class="lobby-player-name">${presenceMarkup(p)}${escapeHTML(labels[p.seat])}</span>${tagMarkup}`;
     list.appendChild(row);
   }
   // Empty placeholder slots show the host how many more players are needed.

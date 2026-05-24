@@ -60,6 +60,22 @@ export const handler = async (event, context) => {
       return json(200, { ok: true, roomClosed: true });
     }
 
+    // From a lobby, archive == leave. We intentionally do NOT decrement
+    // max_players, because anyone in the lobby (or with the join code) can
+    // archive themselves — a malicious user could join+archive in a loop to
+    // walk max_players below 2 and force the room to auto-delete. The
+    // decrement-shrink semantic only makes sense mid-game, where seats are
+    // immutable so each archive really does reduce the table size.
+    if (room.status === "lobby") {
+      if (isHost) {
+        await sql`DELETE FROM rooms WHERE id = ${code}`;
+        return json(200, { ok: true, roomClosed: true });
+      }
+      await sql`DELETE FROM room_seats WHERE room_id = ${code} AND uid = ${user.uid}`;
+      await sql`UPDATE rooms SET updated_at = now() WHERE id = ${code}`;
+      return json(200, { ok: true });
+    }
+
     await sql`DELETE FROM room_seats WHERE room_id = ${code} AND uid = ${user.uid}`;
     const newMax = Math.max(0, Number(room.max_players) - 1);
     const remaining = await sql`SELECT COUNT(*)::int AS n FROM room_seats WHERE room_id = ${code}`;

@@ -77,8 +77,12 @@ CREATE TABLE IF NOT EXISTS room_seats (
   display_name TEXT NOT NULL,
   connected BOOLEAN NOT NULL DEFAULT true,
   joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (room_id, seat_index)
 );
+
+-- Existing deployments: add the presence column in-place.
+ALTER TABLE room_seats ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS games (
   room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,

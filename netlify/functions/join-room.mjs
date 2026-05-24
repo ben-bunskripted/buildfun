@@ -9,10 +9,21 @@ import {
 } from "./_lib.mjs";
 import { redactStateForSeat } from "./_engine.mjs";
 
+// Must match get-room.mjs:ONLINE_THRESHOLD_MS.
+const ONLINE_THRESHOLD_MS = 20_000;
+
 async function roomSnapshot(sql, roomId) {
-  const seats = await sql`SELECT seat_index, uid, display_name, connected
+  const seats = await sql`SELECT seat_index, uid, display_name, connected, last_seen_at
     FROM room_seats WHERE room_id = ${roomId} ORDER BY seat_index`;
-  return seats.map(s => ({ seat: s.seat_index, uid: s.uid, name: s.display_name, connected: s.connected }));
+  const cutoff = Date.now() - ONLINE_THRESHOLD_MS;
+  return seats.map(s => ({
+    seat: s.seat_index,
+    uid: s.uid,
+    name: s.display_name,
+    connected: s.connected,
+    online: new Date(s.last_seen_at).getTime() >= cutoff,
+    lastSeenAt: s.last_seen_at,
+  }));
 }
 
 export const handler = async (event, context) => {
@@ -46,7 +57,7 @@ export const handler = async (event, context) => {
     // newer seq, leaving the rejoiner stuck on a "Joining game…" splash.
     const mine = await sql`SELECT seat_index FROM room_seats WHERE room_id = ${code} AND uid = ${user.uid}`;
     if (mine.length > 0) {
-      await sql`UPDATE room_seats SET connected = true WHERE room_id = ${code} AND uid = ${user.uid}`;
+      await sql`UPDATE room_seats SET connected = true, last_seen_at = now() WHERE room_id = ${code} AND uid = ${user.uid}`;
       const game = await sql`SELECT seq, status, state, last_turn, current_seat FROM games WHERE room_id = ${code}`;
       const g = game[0];
       const inPlay = g && (g.status === "playing" || g.status === "finished");

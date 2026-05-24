@@ -170,26 +170,40 @@ export async function hashPassword(pw) {
   return `pbkdf2$${PBKDF2_ITERS}$${toHex(salt)}$${toHex(hash)}`;
 }
 
+// Fixed dummy salt used to burn PBKDF2 cycles on paths that wouldn't
+// otherwise hit the KDF. Equalizes timing so an attacker can't tell the
+// stored-hash format (or "no such room") from response latency.
+const DUMMY_PBKDF2_SALT = new Uint8Array(16);
+
 export async function verifyPassword(pw, stored) {
-  if (!stored) return false;
+  // Always do one PBKDF2 derivation against `pw` regardless of which branch
+  // we end up taking. Without this, the legacy and malformed-format paths
+  // return in microseconds while the PBKDF2 path takes ~50ms — leaking the
+  // stored format (or whether a room exists at all when the caller passes
+  // a missing stored hash). The result is discarded.
+  const burn = pbkdf2(pw || "", DUMMY_PBKDF2_SALT, PBKDF2_ITERS);
+
+  if (!stored) { await burn; return false; }
   const s = String(stored);
   if (s.startsWith("pbkdf2$")) {
     const parts = s.split("$");
-    if (parts.length !== 4) return false;
+    if (parts.length !== 4) { await burn; return false; }
     const iters = Number(parts[1]);
-    if (!Number.isInteger(iters) || iters < 1000) return false;
+    if (!Number.isInteger(iters) || iters < 1000) { await burn; return false; }
     const salt = fromHex(parts[2]);
     const expected = fromHex(parts[3]);
     const got = await pbkdf2(pw, salt, iters);
+    await burn;
     return timingSafeEqual(got, expected);
   }
   // Legacy v1: salt$hash, single-round SHA-256(salt:pw).
   const parts = s.split("$");
-  if (parts.length !== 2) return false;
+  if (parts.length !== 2) { await burn; return false; }
   const [saltHex, expectedHex] = parts;
-  if (!saltHex || !expectedHex) return false;
+  if (!saltHex || !expectedHex) { await burn; return false; }
   const data = new TextEncoder().encode(`${saltHex}:${pw}`);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  await burn;
   return timingSafeEqual(digest, fromHex(expectedHex));
 }
 

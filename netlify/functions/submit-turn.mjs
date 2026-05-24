@@ -53,17 +53,32 @@ export const handler = async (event, context) => {
       advanceToNextRound(g.state);
       const nextSeq = seq + 1;
       const nextSeat = g.state.currentPlayerIndex;
-      await sql`UPDATE games SET seq = ${nextSeq}, current_seat = ${nextSeat}, status = 'playing',
+      // Seq-guarded UPDATE: see apply-action.mjs for rationale.
+      const upd = await sql`UPDATE games SET seq = ${nextSeq}, current_seat = ${nextSeat}, status = 'playing',
         state = ${JSON.stringify(serialize(g.state))}, last_turn = NULL, updated_at = now()
-        WHERE room_id = ${code}`;
+        WHERE room_id = ${code} AND seq = ${seq}
+        RETURNING seq`;
+      if (!Array.isArray(upd) || upd.length === 0) {
+        const fresh = await sql`SELECT seq, current_seat, status, state FROM games WHERE room_id = ${code}`;
+        const f = fresh[0] || { seq, current_seat: nextSeat, status: "playing", state: null };
+        const redacted = f.state ? redactStateForSeat(f.state, mySeat) : null;
+        return json(409, { error: "stale", seq: Number(f.seq), state: redacted, status: f.status, currentSeat: f.current_seat });
+      }
       return json(200, { ok: true, seq: nextSeq, currentSeat: nextSeat, status: "playing" });
     }
 
     // finishMatch
     if (!isMatchOver(g.state)) return json(409, { error: "match not over" });
     const nextSeq = seq + 1;
-    await sql`UPDATE games SET seq = ${nextSeq}, status = 'finished', last_turn = NULL, updated_at = now()
-      WHERE room_id = ${code}`;
+    const upd = await sql`UPDATE games SET seq = ${nextSeq}, status = 'finished', last_turn = NULL, updated_at = now()
+      WHERE room_id = ${code} AND seq = ${seq}
+      RETURNING seq`;
+    if (!Array.isArray(upd) || upd.length === 0) {
+      const fresh = await sql`SELECT seq, current_seat, status, state FROM games WHERE room_id = ${code}`;
+      const f = fresh[0] || { seq, current_seat: g.current_seat, status: "finished", state: null };
+      const redacted = f.state ? redactStateForSeat(f.state, mySeat) : null;
+      return json(409, { error: "stale", seq: Number(f.seq), state: redacted, status: f.status, currentSeat: f.current_seat });
+    }
     await sql`UPDATE rooms SET status = 'finished', updated_at = now() WHERE id = ${code}`;
     return json(200, { ok: true, seq: nextSeq, currentSeat: g.current_seat, status: "finished" });
   } catch (err) {

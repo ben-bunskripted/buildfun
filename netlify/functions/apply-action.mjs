@@ -95,9 +95,24 @@ export const handler = async (event, context) => {
     const nextSeat = g.state.currentPlayerIndex;
     const nextStatus = "playing";
 
-    await sql`UPDATE games SET seq = ${nextSeq}, current_seat = ${nextSeat}, status = ${nextStatus},
+    // Optimistic UPDATE: only succeed if seq hasn't moved since our read.
+    // Without the seq guard two concurrent apply-actions could both pass the
+    // pre-write seq check, then both UPDATE — last writer silently wins and
+    // the other action is dropped while its caller is told it succeeded.
+    // RETURNING gives us a portable rowsAffected signal across neon's driver
+    // versions (no need to inspect a non-array `rowCount` property).
+    const upd = await sql`UPDATE games SET seq = ${nextSeq}, current_seat = ${nextSeat}, status = ${nextStatus},
       state = ${JSON.stringify(serialize(g.state))}, last_turn = ${JSON.stringify(lastTurn)}, updated_at = now()
-      WHERE room_id = ${code}`;
+      WHERE room_id = ${code} AND seq = ${seq}
+      RETURNING seq`;
+    if (!Array.isArray(upd) || upd.length === 0) {
+      // Someone else's write landed between our read and write. Treat as a
+      // stale collision and let the caller adopt + retry.
+      const fresh = await sql`SELECT seq, current_seat, status, state FROM games WHERE room_id = ${code}`;
+      const f = fresh[0] || { seq, current_seat: nextSeat, status: nextStatus, state: null };
+      const redacted = f.state ? redactStateForSeat(f.state, seat) : null;
+      return json(409, { error: "stale", seq: Number(f.seq), state: redacted, status: f.status, currentSeat: f.current_seat });
+    }
 
     const redacted = redactStateForSeat(g.state, seat);
     const out = {

@@ -177,9 +177,16 @@ export function applyAction(state, seat, action) {
 function extractCardIds(cardsLikeArr) {
   if (!Array.isArray(cardsLikeArr)) return null;
   const ids = [];
+  const seen = new Set();
   for (const entry of cardsLikeArr) {
     const id = entry && entry.card && entry.card.id;
     if (typeof id !== "string") return null;
+    // A single deck has unique card ids — duplicates in an arrangement would
+    // let `pickHandCards` resolve the same physical card multiple times,
+    // which `placeNewSet` / `addToSet` would then fail to remove from hand
+    // (their cleanup filter dedupes on id). Reject up front.
+    if (seen.has(id)) return null;
+    seen.add(id);
     ids.push(id);
   }
   return ids;
