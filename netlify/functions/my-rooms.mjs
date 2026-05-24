@@ -6,13 +6,15 @@
 // the public-table browser and this is per-user; combining them would either
 // leak private rooms or require a flag.
 
-import { db, getUser, json } from "./_lib.mjs";
+import { db, getUser, json, rateLimit } from "./_lib.mjs";
 
 export const handler = async (event, context) => {
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
 
   const sql = db();
+  const limited = await rateLimit(sql, user, "my-rooms");
+  if (limited) return limited;
   try {
     const rows = await sql`
       SELECT r.id, r.name, r.status, r.max_players, r.host_uid, s.seat_index,

@@ -14,6 +14,7 @@ let stepIdx = 0;
 let steps = [];
 let callbacks = null;
 let coachEl = null;
+let backdropEl = null;
 let highlightedEls = [];
 
 // Pre-arranged top of the round-1 deck.
@@ -74,6 +75,7 @@ export function endTutorial() {
   active = false;
   clearHighlights();
   if (coachEl) coachEl.classList.add("hidden");
+  if (backdropEl) backdropEl.classList.add("hidden");
   callbacks = null;
 }
 
@@ -177,6 +179,9 @@ function showStep(step) {
 
   coachEl.classList.remove("hidden", "tutorial-coach-center", "tutorial-coach-bottom");
   coachEl.classList.add(step.kind === "modal" ? "tutorial-coach-center" : "tutorial-coach-bottom");
+  // Only the centred intro/outro modal gets the dim backdrop. The bottom
+  // coach is meant to coexist with the live game UI underneath, no dim.
+  if (backdropEl) backdropEl.classList.toggle("hidden", step.kind !== "modal");
 
   const body = coachEl.querySelector(".tutorial-coach-body");
   body.textContent = step.text;
@@ -193,6 +198,7 @@ function showStep(step) {
         // Hide the modal but keep stepIdx — the step advances when the
         // expected gameplay event fires.
         coachEl.classList.add("hidden");
+        if (backdropEl) backdropEl.classList.add("hidden");
       } else {
         advance();
       }
@@ -255,6 +261,17 @@ function clearHighlights() {
 
 function ensureCoachEl() {
   if (coachEl) return;
+  // Backdrop is its own element appended to <body>, not a pseudo of the
+  // coach. The coach uses `transform: translate(-50%, -50%)` to centre
+  // itself, which makes the coach the containing block for any fixed-
+  // position descendants — so a `position: fixed; inset: 0` ::before would
+  // be clipped to the coach's bounds and paint *inside* the modal instead
+  // of dimming the page. A sibling under <body> avoids that entirely.
+  backdropEl = document.createElement("div");
+  backdropEl.id = "tutorial-backdrop";
+  backdropEl.className = "tutorial-backdrop hidden";
+  document.body.appendChild(backdropEl);
+
   coachEl = document.createElement("div");
   coachEl.id = "tutorial-coach";
   coachEl.className = "tutorial-coach hidden";

@@ -18,3 +18,12 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    # CSP: defence-in-depth so an XSS via innerHTML can't exfiltrate tokens
+    # or load external scripts. The Netlify Identity widget is loaded
+    # cross-origin (pinned with SRI in index.html) and injects an iframe to
+    # https://identity.netlify.com for OAuth — both are explicitly allowed.
+    # `style-src 'unsafe-inline'` because some innerHTML templates set
+    # inline styles; if those are ever migrated to classes this can tighten.
+    # `img-src https:` accepts IDP avatars (e.g., googleusercontent.com)
+    # without enumerating every provider.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://identity.netlify.com; connect-src 'self' https://identity.netlify.com; frame-src https://identity.netlify.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'"

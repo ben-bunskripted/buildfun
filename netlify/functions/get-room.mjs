@@ -14,7 +14,7 @@
 // caller sees their own hand verbatim; every other player's hand and the
 // deck are replaced with same-length opaque placeholders.
 
-import { db, getUser, json } from "./_lib.mjs";
+import { db, getUser, json, rateLimit } from "./_lib.mjs";
 import { redactStateForSeat } from "./_engine.mjs";
 
 const LONG_POLL_MS = 9000;
@@ -30,6 +30,8 @@ export const handler = async (event, context) => {
   if (!code) return json(400, { error: "room code required" });
 
   const sql = db();
+  const limited = await rateLimit(sql, user, "get-room");
+  if (limited) return limited;
   try {
     const rooms = await sql`SELECT id, name, host_uid, status, max_players FROM rooms WHERE id = ${code}`;
     if (rooms.length === 0) return json(404, { error: "room not found" });

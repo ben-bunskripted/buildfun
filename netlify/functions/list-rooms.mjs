@@ -1,10 +1,13 @@
 // List joinable public rooms still in the lobby.
 
-import { db, getUser, json } from "./_lib.mjs";
+import { db, getUser, json, rateLimit } from "./_lib.mjs";
 
 export const handler = async (event, context) => {
-  if (!getUser(context)) return json(401, { error: "sign-in required" });
+  const user = getUser(context);
+  if (!user) return json(401, { error: "sign-in required" });
   const sql = db();
+  const limited = await rateLimit(sql, user, "list-rooms");
+  if (limited) return limited;
   try {
     const rows = await sql`
       SELECT r.id, r.name, r.max_players,

@@ -12,8 +12,19 @@
 <link rel="stylesheet" href="css/styles.css" />
 <!-- Netlify Identity widget — provides Google/email sign-in for Online mode.
      Loaded as a classic script so window.netlifyIdentity exists before the
-     deferred main.js module boots. Fails gracefully when offline. -->
-<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+     deferred main.js module boots. Fails gracefully when offline.
+
+     SRI pins the bytes we trust. If Netlify ships a new widget the script
+     will refuse to load — re-derive the hash with:
+       curl -fsSL https://identity.netlify.com/v1/netlify-identity-widget.js \
+         | openssl dgst -sha384 -binary | openssl base64 -A
+     and update both this integrity attribute and the CSP in netlify.toml
+     if any directive needs to change. `crossorigin="anonymous"` is
+     required so the browser performs SRI verification on the cross-origin
+     response. -->
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"
+        integrity="sha384-dy2tW8xkhLIj8lZR42MCwZhhDb2cCewZiw0uA65CMpdHiJzL+iubx7HzHcCXU2rW"
+        crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="app">

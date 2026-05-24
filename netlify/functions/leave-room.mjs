@@ -14,10 +14,12 @@
 //       * max_players drops below 2 (can't run a 2-player game anymore), OR
 //       * the only remaining seat just vacated.
 
-import { db, getUser, json, parseBody } from "./_lib.mjs";
+import { db, getUser, json, parseBody, checkBodySize, rateLimit } from "./_lib.mjs";
 
 export const handler = async (event, context) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
+  const tooBig = checkBodySize(event, 4 * 1024);
+  if (tooBig) return tooBig;
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
   const { roomId, archive } = parseBody(event);
@@ -26,6 +28,8 @@ export const handler = async (event, context) => {
   const isArchive = !!archive;
 
   const sql = db();
+  const limited = await rateLimit(sql, user, "leave-room");
+  if (limited) return limited;
   try {
     const rooms = await sql`SELECT host_uid, status, max_players FROM rooms WHERE id = ${code}`;
     if (rooms.length === 0) return json(200, { ok: true, roomClosed: true });

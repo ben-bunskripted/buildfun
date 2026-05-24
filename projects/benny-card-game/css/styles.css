@@ -1371,14 +1371,20 @@ body.hand-dragging textarea {
   width: calc(100% - 32px);
   max-width: 380px;
 }
-.tutorial-coach-center::before {
-  /* Dim the rest of the screen to focus attention on the intro / outro. */
-  content: "";
+/* Dim backdrop for the intro/outro modal. Rendered as a sibling of the
+   coach under <body> (see tutorial.js:ensureCoachEl) so the `position: fixed`
+   actually maps to the viewport — the coach itself is `transform`-centred,
+   which would otherwise become the containing block for a nested pseudo
+   and clip the dim to the coach's own box (making the modal look darker
+   than the in-game .modal). Matches the .modal backdrop alpha so the two
+   feel identical. */
+.tutorial-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.55);
-  z-index: -1;
+  z-index: 74;
 }
+.tutorial-backdrop.hidden { display: none; }
 .tutorial-coach-body { font-size: 14px; padding-right: 44px; }
 .tutorial-coach-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .tutorial-coach-actions .pill.primary {

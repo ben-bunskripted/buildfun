@@ -4,6 +4,7 @@
 
 import {
   db, getUser, json, parseBody, verifyPassword,
+  canonicalDisplayName, checkBodySize, rateLimit,
   countActiveRoomsForUser, MAX_ACTIVE_ROOMS_PER_USER,
 } from "./_lib.mjs";
 import { redactStateForSeat } from "./_engine.mjs";
@@ -16,16 +17,23 @@ async function roomSnapshot(sql, roomId) {
 
 export const handler = async (event, context) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
+  const tooBig = checkBodySize(event, 8 * 1024);
+  if (tooBig) return tooBig;
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
 
-  const { roomId, password, displayName } = parseBody(event);
+  const { roomId, password } = parseBody(event);
   const code = (roomId || "").toString().trim().toUpperCase();
   if (!code) return json(400, { error: "room code required" });
-  const seatName = (displayName || user.name || "Player").toString().trim().slice(0, 40) || "Player";
 
   const sql = db();
+  // Stricter limit on join-room than other lobby ops — this is the
+  // password-guessing surface for private rooms.
+  const limited = await rateLimit(sql, user, "join-room");
+  if (limited) return limited;
   try {
+    // Pinned display name — see _lib.mjs:canonicalDisplayName.
+    const seatName = await canonicalDisplayName(sql, user);
     const rooms = await sql`SELECT id, name, host_uid, visibility, password_hash, status, max_players
       FROM rooms WHERE id = ${code}`;
     if (rooms.length === 0) return json(404, { error: "no game with that code" });
@@ -59,6 +67,22 @@ export const handler = async (event, context) => {
     if (room.visibility === "private") {
       const ok = await verifyPassword(String(password || ""), room.password_hash);
       if (!ok) return json(403, { error: "wrong password" });
+    }
+
+    // Prevent two seats sharing a display name (case-insensitive). Without
+    // this, two players named "Ben" would be visually indistinguishable in
+    // the lobby and during play — an impersonation hazard even though the
+    // server keys everything by uid.
+    const lcName = seatName.toLowerCase();
+    const nameClash = await sql`
+      SELECT 1 FROM room_seats
+      WHERE room_id = ${code} AND uid != ${user.uid} AND lower(display_name) = ${lcName}
+      LIMIT 1`;
+    if (nameClash.length > 0) {
+      return json(409, {
+        error: `Someone in this game is already called "${seatName}". Update your name in your profile and try again.`,
+        code: "name-clash",
+      });
     }
 
     // Per-user table cap (only checked for NEW seats — rejoins above bypass).

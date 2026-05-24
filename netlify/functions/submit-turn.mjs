@@ -8,16 +8,13 @@
 // advanceRound: moves the dealer forward and deals the next round.
 // finishMatch: marks the room finished (used after match-end animations).
 
-import { db, getUser, json, parseBody } from "./_lib.mjs";
+import { db, getUser, json, parseBody, checkBodySize, rateLimit } from "./_lib.mjs";
 import { advanceToNextRound, isMatchOver, serialize, redactStateForSeat } from "./_engine.mjs";
-
-const MAX_BODY_BYTES = 8 * 1024;
 
 export const handler = async (event, context) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
-  if (typeof event.body === "string" && event.body.length > MAX_BODY_BYTES) {
-    return json(413, { error: "request too large" });
-  }
+  const tooBig = checkBodySize(event, 8 * 1024);
+  if (tooBig) return tooBig;
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
 
@@ -29,6 +26,8 @@ export const handler = async (event, context) => {
   }
 
   const sql = db();
+  const limited = await rateLimit(sql, user, "submit-turn");
+  if (limited) return limited;
   try {
     const rooms = await sql`SELECT host_uid FROM rooms WHERE id = ${code}`;
     if (rooms.length === 0) return json(404, { error: "room not found" });

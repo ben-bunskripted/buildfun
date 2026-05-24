@@ -24,20 +24,16 @@
 // Stale seq → 409 with the authoritative current state attached so the caller
 // can adopt + retry.
 
-import { db, getUser, json, parseBody } from "./_lib.mjs";
+import { db, getUser, json, parseBody, checkBodySize, rateLimit } from "./_lib.mjs";
 import {
   applyAction, redactStateForSeat, serialize,
   isNoWayOut, finalizeNoWayOut,
 } from "./_engine.mjs";
 
-// Cap incoming bodies to keep a bad client from pushing megabytes of garbage.
-const MAX_BODY_BYTES = 64 * 1024;
-
 export const handler = async (event, context) => {
   if (event.httpMethod !== "POST") return json(405, { error: "method not allowed" });
-  if (typeof event.body === "string" && event.body.length > MAX_BODY_BYTES) {
-    return json(413, { error: "request too large" });
-  }
+  const tooBig = checkBodySize(event, 64 * 1024);
+  if (tooBig) return tooBig;
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
 
@@ -46,6 +42,8 @@ export const handler = async (event, context) => {
   if (!code) return json(400, { error: "room code required" });
 
   const sql = db();
+  const limited = await rateLimit(sql, user, "apply-action");
+  if (limited) return limited;
   try {
     const mySeatRow = await sql`SELECT seat_index FROM room_seats WHERE room_id = ${code} AND uid = ${user.uid}`;
     if (mySeatRow.length === 0) return json(403, { error: "not in this room" });

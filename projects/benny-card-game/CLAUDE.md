@@ -73,8 +73,9 @@ netlify/functions/
 ├── get-room.mjs            # GET:  poll endpoint, supports ?wait=1 long-poll; returns redacted state
 ├── apply-action.mjs        # POST: server-authoritative move commit; validates + applies via engine
 ├── submit-turn.mjs         # POST: host control writes (advanceRound / finishMatch only)
-├── end-game.mjs            # POST: host-only, hard-deletes the room (cascade)
-└── setup-db.mjs            # GET:  one-off schema bootstrap (idempotent)
+└── end-game.mjs            # POST: host-only, hard-deletes the room (cascade)
+
+# Schema lives in ONLINE_SETUP.md §3 (run once via Neon SQL Editor).
 package.json                # @netlify/neon + drizzle-orm + drizzle-kit
 drizzle.config.ts           # schema location + connection URL (NETLIFY_DATABASE_URL)
 ONLINE_SETUP.md             # operator setup notes
@@ -238,12 +239,13 @@ Netlify Identity widget loaded as a classic script (`<script src=".../netlify-id
 
 ### Backend (Netlify Functions + Neon Postgres)
 
-Tables (see `setup-db.mjs`):
+Tables (schema lives in ONLINE_SETUP.md §3; create once via the Neon SQL Editor):
 
-- `users (uid PK, display_name, created_at)` — populated lazily by `auth-sync` on first sign-in.
-- `rooms (id PK = join code, name, host_uid, visibility, password_hash?, status, max_players, …)`
-- `room_seats (room_id, seat_index, uid, display_name, connected, …)` PK on (room_id, seat_index).
-- `games (room_id PK, seq, current_seat, status, state JSONB, last_turn JSONB, updated_at)`.
+- `users (uid PK, display_name, created_at)` — populated by `auth-sync` on first sign-in; canonical source for seat display names (see `_lib.mjs:canonicalDisplayName`).
+- `rooms (id PK = join code, name, host_uid, visibility, password_hash?, status, max_players, …)`. `password_hash` is PBKDF2-SHA256 / 210k iterations (`_lib.mjs:hashPassword`); the legacy single-round-SHA-256 format is still accepted by `verifyPassword` for any pre-cutover rows.
+- `room_seats (room_id, seat_index, uid, display_name, connected, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored.
+- `games (room_id PK, seq, current_seat, status, state JSONB, last_turn JSONB, updated_at)`. State is server-authoritative; reads through `get-room` / `apply-action` are always redacted for the caller's seat.
+- `rate_limit_log (uid, endpoint, ts)` — backs `_lib.mjs:rateLimit`. Sliding-window per-uid/per-endpoint counter; budgets defined in `_lib.mjs:RATE_BUDGETS`.
 
 Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:makeRoomCode`.
 

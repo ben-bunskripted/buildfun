@@ -47,16 +47,63 @@ The frontend loads the Identity widget from
 
 ## 3. Create the database schema
 
-After Identity and the DB are enabled, **sign in once** on the site, then hit:
+Once the DB is enabled, run the following SQL in the **Neon SQL Editor**
+(Project dashboard → Database → Open in Neon). Every statement is
+`IF NOT EXISTS` so it's safe to re-run.
 
-```
-https://<your-site>/.netlify/functions/setup-db
-```
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  uid TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT 'Player',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-It creates the `users`, `rooms`, `room_seats`, and `games` tables. Every
-statement is `IF NOT EXISTS`, so it's safe to re-run. (You can also run the SQL
-by hand from the Neon console if you prefer — see `setup-db.mjs` for the exact
-DDL.) A `{ "ok": true }` response means you're set.
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  host_uid TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'public',
+  password_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'lobby',
+  max_players INT NOT NULL DEFAULT 4,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS room_seats (
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  seat_index INT NOT NULL,
+  uid TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  connected BOOLEAN NOT NULL DEFAULT true,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (room_id, seat_index)
+);
+
+CREATE TABLE IF NOT EXISTS games (
+  room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+  seq BIGINT NOT NULL DEFAULT 0,
+  current_seat INT NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'lobby',
+  state JSONB,
+  last_turn JSONB,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Backs the per-uid sliding-window rate limiter in `_lib.mjs:rateLimit`.
+-- Rows are pruned opportunistically by INSERT; you can also schedule a
+-- nightly `DELETE FROM rate_limit_log WHERE ts < now() - interval '1 hour'`.
+CREATE TABLE IF NOT EXISTS rate_limit_log (
+  uid TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  ts TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS rate_limit_log_uid_endpoint_ts
+  ON rate_limit_log (uid, endpoint, ts DESC);
+
+CREATE INDEX IF NOT EXISTS rooms_public_lobby_idx
+  ON rooms (visibility, status, updated_at DESC);
+```
 
 ## 4. Play
 
@@ -70,7 +117,7 @@ presses **Start game** once at least two players have joined.
 
 To run the functions + DB locally you need the Netlify CLI:
 
-```
+```sh
 npm install
 netlify login
 netlify link            # link this folder to your Netlify site
@@ -116,8 +163,7 @@ endpoint contract (per-action instead of full-state commits). In-progress
 games from v1 will throw on the next action. Wipe them once after deploying:
 
 ```sql
--- Run once via the Neon console or `netlify functions:invoke setup-db`-style
--- shell. Cascades to room_seats + games.
+-- Run once via the Neon SQL Editor. Cascades to room_seats + games.
 DELETE FROM rooms WHERE status IN ('lobby', 'playing');
 ```
 
@@ -135,6 +181,6 @@ Players hitting an already-deleted room get a friendly "room gone" toast.
 | "Online play isn't available" on the Online tab | Identity widget didn't load (offline, or Identity not enabled on the site). |
 | 401 from any function | Not signed in, or Identity not enabled. |
 | 500 mentioning `NETLIFY_DATABASE_URL` / "connection string is not provided" | Netlify DB not enabled, or the site wasn't redeployed after enabling it (the env var is injected at deploy time). Re-trigger a deploy. |
-| Functions work but no tables | Run `/.netlify/functions/setup-db` once while signed in. |
+| Functions work but no tables | Run the schema SQL from §3 in the Neon SQL Editor. |
 | Polls seem to return stale state | Make sure the deployed `sw.js` is v39+ (it bypasses `/.netlify/functions`). Bump the cache and refresh. |
 | Existing in-progress online game stuck after v2 deploy | Run the migration SQL above (`DELETE FROM rooms WHERE status IN ('lobby', 'playing')`). v1 state isn't compatible with the new server-authoritative protocol. |
