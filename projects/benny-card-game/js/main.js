@@ -3267,19 +3267,46 @@ function enterLobbyScreen(res) {
 }
 
 // Called both from enterLobbyScreen and from each poll while we have a session.
+// When two or more seats share a (case-insensitive) display name, append a
+// short uid-derived suffix to each colliding name so the roster stays
+// visually unambiguous. Identity is keyed on uid server-side, so this is
+// purely a UX nicety, not a security boundary.
+function disambiguatePlayerLabels(players) {
+  const counts = new Map();
+  for (const p of players) {
+    const k = (p.name || "").trim().toLowerCase();
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const labels = {};
+  for (const p of players) {
+    const k = (p.name || "").trim().toLowerCase();
+    if (counts.get(k) > 1 && p.uid) {
+      // Last 4 alphanumeric chars of uid. Identity uids are long opaque
+      // strings, so 4 chars give 1/65k visual collisions — more than enough
+      // for a 4-seat room.
+      const tag = p.uid.replace(/[^A-Za-z0-9]/g, "").slice(-4);
+      labels[p.seat] = `${p.name} #${tag}`;
+    } else {
+      labels[p.seat] = p.name;
+    }
+  }
+  return labels;
+}
+
 function renderLobbyRoster(players, server) {
   const list = $("lobby-player-list");
   if (!list) return;
   list.innerHTML = "";
   const ordered = [...(players || [])].sort((a, b) => a.seat - b.seat);
   const max = Number((server && server.maxPlayers) || online.maxPlayers()) || ordered.length;
+  const labels = disambiguatePlayerLabels(ordered);
   for (const p of ordered) {
     const row = document.createElement("div");
     row.className = "lobby-player" + (p.connected ? "" : " is-disconnected");
     const tags = [];
     if (p.seat === 0) tags.push("host");
     if (p.seat === online.mySeat()) tags.push("you");
-    row.innerHTML = `<span>${escapeHTML(p.name)}</span>${tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : ""}`;
+    row.innerHTML = `<span>${escapeHTML(labels[p.seat])}</span>${tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : ""}`;
     list.appendChild(row);
   }
   // Empty placeholder slots show the host how many more players are needed.

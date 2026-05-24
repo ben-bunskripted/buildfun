@@ -68,22 +68,10 @@ export const handler = async (event, context) => {
       const ok = await verifyPassword(String(password || ""), room.password_hash);
       if (!ok) return json(403, { error: "wrong password" });
     }
-
-    // Prevent two seats sharing a display name (case-insensitive). Without
-    // this, two players named "Ben" would be visually indistinguishable in
-    // the lobby and during play — an impersonation hazard even though the
-    // server keys everything by uid.
-    const lcName = seatName.toLowerCase();
-    const nameClash = await sql`
-      SELECT 1 FROM room_seats
-      WHERE room_id = ${code} AND uid != ${user.uid} AND lower(display_name) = ${lcName}
-      LIMIT 1`;
-    if (nameClash.length > 0) {
-      return json(409, {
-        error: `Someone in this game is already called "${seatName}". Update your name in your profile and try again.`,
-        code: "name-clash",
-      });
-    }
+    // Identity is keyed on `uid`, not display name — two friends both called
+    // "Ben" can share a room without confusing the server. The client adds a
+    // short uid suffix to visually disambiguate when names collide (see
+    // `main.js:disambiguatePlayerLabels`).
 
     // Per-user table cap (only checked for NEW seats — rejoins above bypass).
     const activeCount = await countActiveRoomsForUser(sql, user.uid);
