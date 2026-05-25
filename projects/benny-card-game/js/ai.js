@@ -531,20 +531,24 @@ function planAfterDraw(state, actions, difficulty) {
   applyPlayAndAddLoop(state, actions, difficulty);
 
   if (difficulty !== "easy") {
-    const v = virtualState(state, actions);
-    const me = v.players[v.currentPlayerIndex];
-    if (me.hasOpened) {
+    // Take back every swappable benny, not just one. Each swap removes a
+    // natural from hand and returns a wildcard (which enumerateSwaps skips),
+    // so the candidate pool strictly shrinks and the loop terminates.
+    let safety = 12;
+    while (safety-- > 0) {
+      const v = virtualState(state, actions);
+      const me = v.players[v.currentPlayerIndex];
+      if (!me.hasOpened) break;
       const swaps = enumerateSwaps(me.hand, v.table, wildRank);
-      if (swaps.length) {
-        const s = swaps[0];
-        actions.push({
-          type: "swap",
-          setId: s.setId,
-          positionIndex: s.positionIndex,
-          naturalCardId: s.naturalCardId,
-          narration: `swapped a ${cardLabel(s.takesBack)} back into hand`,
-        });
-      }
+      if (!swaps.length) break;
+      const s = swaps[0];
+      actions.push({
+        type: "swap",
+        setId: s.setId,
+        positionIndex: s.positionIndex,
+        naturalCardId: s.naturalCardId,
+        narration: `swapped a ${cardLabel(s.takesBack)} back into hand`,
+      });
     }
   }
 

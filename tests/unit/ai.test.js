@@ -130,6 +130,21 @@ describe("planTurn — hard: swap a benny out instead of padding a set", () => {
     expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "5D"))).toBe(false);
   });
 
+  it("takes back multiple bennies in one turn", () => {
+    // Two number sets, each holding a wildcard; we hold a natural that swaps
+    // each one. Both should come back in a single turn, not just one.
+    const s = turnFixture({
+      hand: ["5D", "8D", "9H"],
+      table: [
+        numberSet("5", [natSlot("5S"), natSlot("5H"), wildSlot("KC", "5")], { id: "set1", ownerIndex: 0 }),
+        numberSet("8", [natSlot("8S"), natSlot("8H"), wildSlot("KD", "8")], { id: "set2", ownerIndex: 0 }),
+      ],
+    });
+    const plan = planTurn(s, "hard");
+    const swaps = plan.filter(a => a.type === "swap");
+    expect(swaps.map(a => a.naturalCardId).sort()).toEqual(["5D", "8D"]);
+  });
+
   it("still pads the set (sheds a card) when an opponent is about to go out", () => {
     const s = turnFixture({
       hand: ["5D", "9H", "3C"],
