@@ -2838,10 +2838,11 @@ function initOnline() {
     onRoomGone: handleOnlineRoomGone,
   });
 
-  net.initIdentity().then(() => refreshOnlineModeBlock());
+  net.initIdentity().then(() => { refreshOnlineModeBlock(); tryPendingJoin(); });
   net.onAuth((user) => {
     if (user) { net.syncAuth(onlineDisplayName()).catch(() => {}); }
     refreshOnlineModeBlock();
+    tryPendingJoin();
   });
 }
 
@@ -3352,7 +3353,7 @@ function renderLobbyRoster(players, server) {
     } else {
       statusEl.textContent = remaining > 0
         ? `Waiting for ${remaining} more player${remaining === 1 ? "" : "s"} before the host can start…`
-        : "Waiting for the host to start…";
+        : "Waiting for the host to start the game…";
     }
   }
 }
@@ -3378,20 +3379,27 @@ function boot() {
   applyJoinDeepLink();
 }
 
-// Consume ?join=CODE on first load — drops the user on the Online tab with
-// the join code pre-filled. Doesn't auto-join (they may need to sign in or
-// pick a display name first). The param is stripped from the URL so a refresh
-// doesn't re-trigger the deep link.
+// Consume ?join=CODE on first load: drop the user on the Online tab with the
+// code pre-filled, then join the table directly. Identity inits asynchronously,
+// so if they're not signed in yet the code is held and the join fires the
+// moment auth resolves (tryPendingJoin is also called from initOnline's auth
+// callbacks). The param is stripped from the URL so a refresh doesn't
+// re-trigger the deep link.
+let pendingJoinCode = null;
+
 function applyJoinDeepLink() {
   try {
     const params = new URLSearchParams(window.location.search);
     const code = (params.get("join") || "").trim().toUpperCase();
-    if (!code) return;
-    goToStartConfigStep("online");
-    const input = $("online-join-code");
-    if (input) {
-      input.value = code;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+    if (code) {
+      goToStartConfigStep("online");
+      const input = $("online-join-code");
+      if (input) {
+        input.value = code;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      pendingJoinCode = code;
+      tryPendingJoin();
     }
     // Clean the URL so reloads don't re-apply the deep link.
     params.delete("join");
@@ -3399,5 +3407,17 @@ function applyJoinDeepLink() {
     const newUrl = window.location.pathname + (cleanQuery ? "?" + cleanQuery : "") + window.location.hash;
     window.history.replaceState({}, "", newUrl);
   } catch (_) { /* URL parsing or history API unavailable — ignore */ }
+}
+
+// Fire the deferred deep-link join once Identity is ready and the user is
+// signed in. No-op until both hold — it's called again from the auth
+// callbacks, so a sign-in completed after clicking the link still joins.
+function tryPendingJoin() {
+  if (!pendingJoinCode) return;
+  if (!net.isIdentityAvailable() || !net.currentUser()) return;
+  const code = pendingJoinCode;
+  pendingJoinCode = null;
+  const pwField = $("online-join-password");
+  joinOnlineRoom(code, pwField ? pwField.value : "");
 }
 document.addEventListener("DOMContentLoaded", boot);
