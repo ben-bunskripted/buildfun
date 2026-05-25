@@ -2,7 +2,7 @@
 
 import { buildDeck, RANKS, CARD_POINTS, isWildcard } from "./cards.js";
 import { shuffleInPlace } from "./rng.js";
-import { validateNewSet } from "./rules.js";
+import { validateAddition, validateSwap } from "./rules.js";
 
 export const WILDCARD_ORDER = ["A","2","3","4","5","6","7","8","9","10","J","Q","K","A"];
 // Display labels per round. Distinct from WILDCARD_ORDER because the final round
@@ -391,48 +391,50 @@ export function isMatchOver(state) {
 
 // ---------- No Way Out detection ----------
 //
-// A round is "no way out" when the table is frozen — no run exists and every
-// number set is capped at 4 — AND no player holds a hand that could legally
-// open a new set. With no adds, no opens, and no swap that shrinks a hand,
-// the round can never end on a winner; score everyone's current hand instead.
+// A round is a dead draw only when nobody can ever empty their hand. Two
+// conditions must hold together:
+//
+//   1. No hand can open a new set. Opening lays down >=3 cards while keeping
+//      one to discard (placeNewSet), so it needs >=4 cards in hand. A hand only
+//      ever grows by the single card drawn each turn, so any hand of <3 cards
+//      can never reach 4 — it can never open, whatever it draws.
+//   2. No meld can be extended by a reachable card. Every card not currently
+//      melded counts as reachable: drawFromDeck recycles the discard pile, so
+//      anything in a hand, the deck, or the discard is eventually drawable. That
+//      pool also includes wildcards a single swap could free — swap a table
+//      wildcard for its off-table natural, then add the freed wildcard to an
+//      open run. Capped number sets and runs with no reachable extender stay
+//      frozen; an incomplete set (its missing suit-card is always off-table) or
+//      an open-ended run does not.
 
-function* combinations(n, k) {
-  if (k > n) return;
-  const idx = Array.from({ length: k }, (_, i) => i);
-  while (true) {
-    yield idx.slice();
-    let i = k - 1;
-    while (i >= 0 && idx[i] === n - k + i) i--;
-    if (i < 0) return;
-    idx[i]++;
-    for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
-  }
+// Every card not currently melded on the table.
+function offTableCards(state) {
+  const onTable = new Set();
+  for (const s of state.table) for (const c of s.cards) onTable.add(c.card.id);
+  return buildDeck().filter(c => !onTable.has(c.id));
 }
 
-function tableFrozen(state) {
-  // An empty table isn't "frozen" — no one has opened yet, so players will
-  // keep drawing/discarding until someone can. Without this guard, an unlucky
-  // pass of weak hands fires no-way-out on the very first discard.
-  if (state.table.length === 0) return false;
+// Wildcards a single swap could pull off the table into a hand: a melded
+// wildcard whose matching natural is still off-table (making the swap legal).
+function swapFreeableWildcards(state, offTable) {
+  const wild = state.wildcardRank;
+  const freed = [];
   for (const s of state.table) {
-    if (s.type === "run") return false;
-    if (s.type === "number" && s.cards.length < 4) return false;
+    for (let i = 0; i < s.cards.length; i++) {
+      if (!s.cards[i].isWild) continue;
+      if (offTable.some(c => validateSwap(s, i, c, wild).ok)) freed.push(s.cards[i].card);
+    }
   }
-  return true;
+  return freed;
 }
 
-function canFormAnyNewSet(hand, state) {
-  if (hand.length < 3) return false;
-  const ranksOnTable = new Set(state.table.filter(s => s.type === "number").map(s => s.rank));
-  // Cap at 4 — number sets max out at 4 cards, runs can be larger but if a
-  // 3-card subset doesn't form a valid play, neither will any 4-card subset.
-  for (let size = 3; size <= Math.min(4, hand.length); size++) {
-    for (const idx of combinations(hand.length, size)) {
-      const subset = idx.map(i => hand[i]);
-      const v = validateNewSet(subset, state.wildcardRank);
-      if (!v.ok) continue;
-      if (v.type === "number" && ranksOnTable.has(v.rank)) continue;
-      return true;
+function anyMeldExtendable(state) {
+  const wild = state.wildcardRank;
+  const offTable = offTableCards(state);
+  const candidates = offTable.concat(swapFreeableWildcards(state, offTable));
+  for (const s of state.table) {
+    for (const c of candidates) {
+      if (validateAddition(s, [c], wild).ok) return true;
     }
   }
   return false;
@@ -441,10 +443,9 @@ function canFormAnyNewSet(hand, state) {
 export function isNoWayOut(state) {
   if (state.phase === "roundOver") return false;
   if (state.dealerOpeningPending) return false;
-  if (!tableFrozen(state)) return false;
-  for (const p of state.players) {
-    if (canFormAnyNewSet(p.hand, state)) return false;
-  }
+  if (state.table.length === 0) return false;
+  if (state.players.some(p => p.hand.length >= 3)) return false;
+  if (anyMeldExtendable(state)) return false;
   return true;
 }
 
