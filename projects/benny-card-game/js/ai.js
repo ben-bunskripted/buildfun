@@ -483,7 +483,19 @@ function applyPlayAndAddLoop(initialState, actions, difficulty) {
     }
 
     if (me.hasOpened) {
-      const adds = enumerateAdditions(me.hand, v.table, wildRank).filter(a => me.hand.length - 1 >= 1);
+      let adds = enumerateAdditions(me.hand, v.table, wildRank).filter(a => me.hand.length - 1 >= 1);
+      // Don't burn a natural card padding a meld when that same card could
+      // instead swap a wildcard back out of a set — recovering a 15-point
+      // wild to reuse beats a plain add. Prefer adds that DON'T have a swap
+      // alternative; if every available add could be a swap, stop here and
+      // let the swap step (in planAfterDraw) take the benny back. Disabled in
+      // the endgame: when an opponent is about to go out, shedding a card
+      // (adds shrink the hand; swaps don't) matters more than the wild.
+      if (adds.length && difficulty !== "easy" && maxOpponentThreat(v) < 80) {
+        const nonSwap = adds.filter(a => !findSwappableWildFor(me.hand.find(c => c.id === a.cardId), v.table, wildRank));
+        if (nonSwap.length) adds = nonSwap;
+        else break;
+      }
       if (adds.length) {
         const chosen = adds[0];
         const card = me.hand.find(c => c.id === chosen.cardId);
@@ -550,6 +562,9 @@ function wantsDiscardTop(state, top, difficulty) {
   if (isWildcard(top, wildRank)) return true;
   const swap = findSwappableWildFor(top, state.table, wildRank);
   if (swap && me.hasOpened) return true;
+  // Extending a meld already on the table is just as good a reason to pick up
+  // as opening a new set. Only possible once we've opened (can't add before).
+  if (me.hasOpened && enumerateAdditions([top], state.table, wildRank).length) return true;
   const before = enumerateNewSets(me.hand, wildRank, state.table).length;
   const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
   if (after > before) return true;
