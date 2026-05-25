@@ -18,6 +18,31 @@ Open `http://localhost:8000` for hot-seat modes. For Online mode
 `inset` shorthand, `replaceChildren`, `100dvh`, `backdrop-filter`,
 pointer events).
 
+## Tests
+
+Tooling lives at the **repo root** (`../../`), not in this directory — the
+client stays buildless; tests are dev-only.
+
+```sh
+npm test            # Vitest: unit + DOM (jsdom) + backend — runs in Node, fast
+npm run test:e2e    # Playwright: drives index.html in a real browser
+```
+
+- **Vitest** (`vitest.config.js`) covers `tests/unit` (rng, cards, rules, game
+  incl. No Way Out, scoring, ai self-play, achievements, profiles), `tests/dom`
+  (jsdom: storage, `renderCard`) and `tests/backend` (`_engine` applyAction +
+  redaction, `_lib` password/rate-limit/etc. with a mocked Neon `sql` tag).
+  Shared card/meld builders are in `tests/helpers.js`.
+- **Playwright** (`playwright.config.js`, specs in `tests/e2e`) boots the static
+  client via `python -m http.server` and exercises the start → deal → play flow.
+  `tests/e2e/fixtures.js` seeds a username (skips the welcome modal) and the
+  config sets `serviceWorkers: "block"` (the PWA SW's first-activation
+  `controllerchange` reloads the page and would race the tests).
+- **Browser pinning:** Playwright must match the pre-baked browser build in
+  `/opt/pw-browsers` (the CDN is firewalled, so `playwright install` can't fetch
+  others). Build 1194 ⇒ `@playwright/test@1.56.x`. Only Chromium is pre-baked;
+  WebKit/Firefox are opt-in via `PW_ALL_BROWSERS=1` where installed.
+
 ## Layout
 
 ```text
@@ -163,14 +188,28 @@ labels the most recent saved match with its mode name.
 
 ## No Way Out
 
-`isNoWayOut(state)` checks each player's hand against the top of the discard
-and the deck top to see whether *anyone* could legally open a set/run, add
-to an existing meld, or swap a wildcard if it were their turn. If no legal
-move exists for anyone and the deck is empty, the round ends as a draw via
-`finalizeNoWayOut(state)`: everyone scores their full hand (no winner
-zero-score), and the round-end screen shows a "No Way Out" banner instead
-of a winner. The dealer-slot reveal still runs when scoring mode picks
-Random, so the visual rhythm matches the dealt modes.
+`isNoWayOut(state)` (game.js) fires only when the round can *never* end on a
+winner. The deck never truly runs out — `drawFromDeck` recycles the discard
+pile — so detection is based on what's reachable, not on the deck being empty.
+Two conditions must both hold:
+
+1. **No hand can open a new set.** Opening lays down ≥3 cards while keeping one
+   to discard, so it needs ≥4 cards in hand; a hand only grows by the single
+   card drawn each turn, so any hand with `< 3` cards can never open, whatever
+   it draws. So every player must be holding fewer than 3 cards.
+2. **No meld can be extended by a reachable card.** Every card not currently
+   melded is reachable (the deck recycles the discard, so anything in a hand,
+   the deck, or the discard is eventually drawable). That pool also includes
+   wildcards a single swap could free — swap a table wildcard for its off-table
+   natural, then add the freed wildcard to an open run. A meld is extendable if
+   `validateAddition` accepts any reachable card; capped number sets and runs
+   with no reachable extender are frozen.
+
+When both hold, the round ends as a draw via `finalizeNoWayOut(state)`:
+everyone scores their full hand (no winner zero-score), and the round-end
+screen shows a "No Way Out" banner instead of a winner. The check runs after
+each discard (main.js). The dealer-slot reveal still runs when scoring mode
+picks Random, so the visual rhythm matches the dealt modes.
 
 ## PWA / offline
 
