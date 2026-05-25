@@ -11,3 +11,7 @@ ideas.png
 # Node / Netlify
 node_modules/
 .netlify/
+
+# Test artifacts
+test-results/
+playwright-report/

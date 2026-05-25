@@ -18,6 +18,31 @@ Open `http://localhost:8000` for hot-seat modes. For Online mode
 `inset` shorthand, `replaceChildren`, `100dvh`, `backdrop-filter`,
 pointer events).
 
+## Tests
+
+Tooling lives at the **repo root** (`../../`), not in this directory — the
+client stays buildless; tests are dev-only.
+
+```sh
+npm test            # Vitest: unit + DOM (jsdom) + backend — runs in Node, fast
+npm run test:e2e    # Playwright: drives index.html in a real browser
+```
+
+- **Vitest** (`vitest.config.js`) covers `tests/unit` (rng, cards, rules, game
+  incl. No Way Out, scoring, ai self-play, achievements, profiles), `tests/dom`
+  (jsdom: storage, `renderCard`) and `tests/backend` (`_engine` applyAction +
+  redaction, `_lib` password/rate-limit/etc. with a mocked Neon `sql` tag).
+  Shared card/meld builders are in `tests/helpers.js`.
+- **Playwright** (`playwright.config.js`, specs in `tests/e2e`) boots the static
+  client via `python -m http.server` and exercises the start → deal → play flow.
+  `tests/e2e/fixtures.js` seeds a username (skips the welcome modal) and the
+  config sets `serviceWorkers: "block"` (the PWA SW's first-activation
+  `controllerchange` reloads the page and would race the tests).
+- **Browser pinning:** Playwright must match the pre-baked browser build in
+  `/opt/pw-browsers` (the CDN is firewalled, so `playwright install` can't fetch
+  others). Build 1194 ⇒ `@playwright/test@1.56.x`. Only Chromium is pre-baked;
+  WebKit/Firefox are opt-in via `PW_ALL_BROWSERS=1` where installed.
+
 ## Layout
 
 ```text
