@@ -3360,6 +3360,34 @@ function renderLobbyRoster(players, server) {
   }
 }
 
+// ---------- Version stamp ----------
+// Keep in sync with CACHE in sw.js. Surfaced in the start-screen footer so the
+// running build is verifiable at a glance. We also read the active service
+// worker cache key (the thing that actually gates asset freshness): if it
+// disagrees with this constant, the client is serving stale cached assets and
+// the stamp flags it in red.
+const APP_BUILD = "v73";
+
+async function renderVersionStamp() {
+  const el = $("app-version");
+  if (!el) return;
+  let cacheVer = null;
+  try {
+    if (globalThis.caches) {
+      const keys = await caches.keys();
+      const benny = keys.find(k => k.startsWith("benny-"));
+      if (benny) cacheVer = benny.replace(/^benny-/, "");
+    }
+  } catch (_) { /* caches unavailable (e.g. private mode) — show build only */ }
+  if (cacheVer && cacheVer !== APP_BUILD) {
+    el.textContent = `Benny ${APP_BUILD} · cache ${cacheVer} — refresh to update`;
+    el.classList.add("stale");
+  } else {
+    el.textContent = `Benny ${APP_BUILD}`;
+    el.classList.remove("stale");
+  }
+}
+
 // ---------- Boot ----------
 function boot() {
   buildStart();
@@ -3379,6 +3407,7 @@ function boot() {
   showScreen("screen-start");
   showWelcomeModalIfNeeded();
   applyJoinDeepLink();
+  renderVersionStamp();
 }
 
 // Consume ?join=CODE on first load: drop the user on the Online tab with the

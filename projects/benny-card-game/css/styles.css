@@ -1255,6 +1255,13 @@ body.hand-dragging textarea {
 /* Install Benny is opportunistic — keep it on its own row when present so
    the three primary links stay together. */
 .start-footer #install-btn { flex-basis: 100%; text-align: center; }
+/* Build stamp — muted, full-width under the links. Lets the user confirm
+   which version actually loaded (and flags a stale service-worker cache). */
+.start-footer-version {
+  flex-basis: 100%; text-align: center;
+  font-size: 11px; color: var(--ink-soft); opacity: 0.6;
+}
+.start-footer-version.stale { color: var(--danger); opacity: 0.95; }
 
 .feedback-textarea {
   width: 100%; min-height: 110px; resize: vertical; font-family: inherit;
