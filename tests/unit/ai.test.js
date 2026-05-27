@@ -208,6 +208,66 @@ describe("planTurn — hard: going out beats wildcard recovery", () => {
   });
 });
 
+describe("planTurn — hard: wildcard discipline when opening", () => {
+  function holdFixture(hand, oppHand) {
+    const s = freshMatch(["Me", "Opp"], { wildcardRank: "K" });
+    s.dealerOpeningPending = false;
+    s.currentPlayerIndex = 0;
+    s.players[0].hasOpened = false;
+    s.players[0].hand = cards(...hand);
+    s.players[1].hand = cards(...oppHand);
+    s.table = [];
+    s.deck = cards("9D");          // inert draw — won't complete a natural set
+    s.discardPile = cards("7C");   // inert top
+    return s;
+  }
+
+  it("#1: won't open a majority-wildcard set — holds the bennies instead", () => {
+    // 2 naturals + 2 bennies: every legal new set here is majority-wild
+    // (1 natural + 2 wilds). With no opponent pressure, hold them.
+    const s = holdFixture(["5H", "2C", "KC", "KD"], ["2S", "3S", "4S", "5S", "6S", "7S"]);
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "play")).toBe(false);
+  });
+
+  it("#2: holds a low-value wild run when no opponent is threatening", () => {
+    // 2♠3♠ + a benny is a legal (non-wild-heavy) run, but frees only 5 natural
+    // points — not worth stranding a 15-point wildcard with the round wide open.
+    const s = holdFixture(["2S", "3S", "KC", "9D"], ["2H", "3H", "4H", "5H", "6H", "7H"]);
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "play")).toBe(false);
+  });
+
+  it("#2: spends the wild to shed once an opponent is about to go out", () => {
+    const s = holdFixture(["2S", "3S", "KC", "9D"], ["2H"]); // opponent on 1 card
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "play")).toBe(true);
+  });
+});
+
+describe("planTurn — hard: shape-aware opening", () => {
+  it("#3: opens the run that keeps a pair, not the set that breaks it", () => {
+    // 5♠6♠7♠ (run) and 6♠6♥6♦ (set) are both available and equal value (18),
+    // but share 6♠ so only one can be laid. The run leaves the 6♥6♦ pair intact;
+    // the set leaves a weak 5♠/7♠ gap. Shape awareness should prefer the run.
+    const s = freshMatch(["Me", "Opp"], { wildcardRank: "K" });
+    s.dealerOpeningPending = false;
+    s.currentPlayerIndex = 0;
+    s.players[0].hasOpened = false;
+    s.players[0].hand = cards("5S", "6S", "7S", "6H", "6D");
+    s.players[1].hand = cards("2H", "3H", "4H", "8H", "9H", "10H");
+    s.table = [];
+    s.deck = cards("QD");
+    s.discardPile = cards("2C");
+    const plan = planTurn(s, "hard");
+    const play = plan.find(a => a.type === "play");
+    expect(play).toBeTruthy();
+    expect(play.arrangement.type).toBe("run");
+    expect(play.arrangement.suit).toBe("S");
+  });
+});
+
 describe("planTurn — dealer opening turn", () => {
   it("opens without drawing (the dealer's first turn has no draw)", () => {
     const s = makeCpuMatch(3, "hard");
