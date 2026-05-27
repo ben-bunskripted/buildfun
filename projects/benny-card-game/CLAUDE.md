@@ -29,7 +29,7 @@ npm run test:e2e    # Playwright: drives index.html in a real browser
 ```
 
 - **Vitest** (`vitest.config.js`) covers `tests/unit` (rng, cards, rules, game
-  incl. No Way Out, scoring, ai self-play, achievements, profiles), `tests/dom`
+  scoring, ai self-play, achievements, profiles), `tests/dom`
   (jsdom: storage, `renderCard`) and `tests/backend` (`_engine` applyAction +
   redaction, `_lib` password/rate-limit/etc. with a mocked Neon `sql` tag).
   Shared card/meld builders are in `tests/helpers.js`.
@@ -55,7 +55,7 @@ benny-card-game/
 ├── js/
 │   ├── main.js             # UI controller, screen routing, event wiring, boot
 │   ├── cards.js            # deck model + card renderer (two render modes — see below)
-│   ├── game.js             # multiplayer/CPU match state machine + No Way Out
+│   ├── game.js             # multiplayer/CPU match state machine
 │   ├── scoring.js          # scoring-only match state
 │   ├── rules.js            # validateNewSet / validateAddition / validateSwap (pure)
 │   ├── ai.js               # CPU planTurn — enumerates plays, picks by difficulty
@@ -186,30 +186,14 @@ labels the most recent saved match with its mode name.
 
 `game.js` state carries a `matchEvents: {opens, discards, rounds}` slice used only by the achievement evaluator at match-end. Populated by `placeNewSet` (first time a player opens in a round), `discard` (every discard, with `wasWild` flag), and `finalizeRoundScoring` (per-round meta: winner, dealer, `openedOrder`, `winnerWildsOnTable`). Scoring mode emits the same `rounds` shape with `openedOrder: null` so the evaluator can branch on "no card detail available". When a run is *added to* by someone other than the owner, the added cards are credited to the adder (in their meld history) AND counted toward the owner's run-length stats — see the credit-additions changes in game.js.
 
-## No Way Out
+## Number-set sizing
 
-`isNoWayOut(state)` (game.js) fires only when the round can *never* end on a
-winner. The deck never truly runs out — `drawFromDeck` recycles the discard
-pile — so detection is based on what's reachable, not on the deck being empty.
-Two conditions must both hold:
-
-1. **No hand can open a new set.** Opening lays down ≥3 cards while keeping one
-   to discard, so it needs ≥4 cards in hand; a hand only grows by the single
-   card drawn each turn, so any hand with `< 3` cards can never open, whatever
-   it draws. So every player must be holding fewer than 3 cards.
-2. **No meld can be extended by a reachable card.** Every card not currently
-   melded is reachable (the deck recycles the discard, so anything in a hand,
-   the deck, or the discard is eventually drawable). That pool also includes
-   wildcards a single swap could free — swap a table wildcard for its off-table
-   natural, then add the freed wildcard to an open run. A meld is extendable if
-   `validateAddition` accepts any reachable card; capped number sets and runs
-   with no reachable extender are frozen.
-
-When both hold, the round ends as a draw via `finalizeNoWayOut(state)`:
-everyone scores their full hand (no winner zero-score), and the round-end
-screen shows a "No Way Out" banner instead of a winner. The check runs after
-each discard (main.js). The dealer-slot reveal still runs when scoring mode
-picks Random, so the visual rhythm matches the dealt modes.
+A number set holds at most four *naturals* (one per suit — the duplicate-suit
+guard in `validateNewSet` / `validateAddition` enforces this), but wildcards
+can pad it beyond four. So a Benny can always be laid onto a complete
+four-of-a-kind. There is intentionally no overall cap on set size and no
+"No Way Out" dead-draw detection: a stuck round is never a true dead end while
+a reachable wildcard can extend an existing set.
 
 ## PWA / offline
 
@@ -238,7 +222,7 @@ The save itself is automatic — this button is just the "stop and walk away" af
 
 ## Rule: one number set per rank on the table
 
-`placeNewSet` (game.js) rejects creating a number set whose rank already exists anywhere on the table (any player's section). Reason: with wildcards in the existing set, a parallel set would put >4 cards representing that rank on the table. The check is rank-only (`s.type === "number" && s.rank === arrangement.rank`); within-set count is still capped at 4 by `validateNewSet` and `validateAddition`.
+`placeNewSet` (game.js) rejects creating a number set whose rank already exists anywhere on the table (any player's section). This keeps each rank to a single pile rather than scattering it across parallel sets. The check is rank-only (`s.type === "number" && s.rank === arrangement.rank`); the duplicate-suit guard in `validateNewSet` / `validateAddition` still keeps naturals to one per suit, but wildcards may pad a set past four cards.
 
 `ai.js:enumerateNewSets(hand, wildRank, table)` filters out plays of ranks already in `table` so the CPU never offers an illegal play.
 

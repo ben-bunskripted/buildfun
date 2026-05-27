@@ -16,7 +16,6 @@ import {
   createMatch, startNextRound, beginTurn,
   drawFromDeck, drawFromDiscard,
   placeNewSet, addToSet, swapWildcard, discard,
-  isNoWayOut, finalizeNoWayOut,
   isMatchOver, advanceToNextRound, serialize,
 } from "../../projects/benny-card-game/js/game.js";
 import {
@@ -25,7 +24,6 @@ import {
 
 export {
   createMatch, startNextRound, beginTurn,
-  isNoWayOut, finalizeNoWayOut,
   isMatchOver, advanceToNextRound, serialize,
 };
 

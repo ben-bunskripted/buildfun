@@ -38,7 +38,7 @@ export function isMyTurn() {
 // ---- Action commit (actor side) ----
 //
 // Send one action to the server, await its response, and adopt the resulting
-// authoritative state. Returns { ok, drawnCard?, noWayOut? } so the caller
+// authoritative state. Returns { ok, drawnCard? } so the caller
 // (main.js action sites) can drive any local follow-up (animations, screen
 // transitions, etc.).
 //
@@ -62,7 +62,6 @@ export async function applyActionRemote(action) {
     return {
       ok: true,
       drawnCard: res.drawnCard || null,
-      noWayOut: !!res.noWayOut,
       currentSeat: res.currentSeat,
       status: res.status,
     };
@@ -81,7 +80,7 @@ export async function applyActionRemote(action) {
 
 // Convenience wrapper for action sites in main.js: if we're in an active
 // online session, route through the server; otherwise run the local engine
-// callback. Returns a uniform `{ok, reason?, drawnCard?, noWayOut?}` shape so
+// callback. Returns a uniform `{ok, reason?, drawnCard?}` shape so
 // the caller doesn't need to branch on online vs. local for the result.
 export async function applyOnlineOrLocal({ action, localApply }) {
   if (isActive()) {
@@ -90,11 +89,10 @@ export async function applyOnlineOrLocal({ action, localApply }) {
       ok: res.ok,
       reason: res.reason,
       drawnCard: res.drawnCard || null,
-      noWayOut: !!res.noWayOut,
     };
   }
   const r = localApply();
-  return { ok: !!(r && r.ok), reason: r && r.reason, drawnCard: null, noWayOut: false, ...((r && typeof r === "object") ? r : {}) };
+  return { ok: !!(r && r.ok), reason: r && r.reason, drawnCard: null, ...((r && typeof r === "object") ? r : {}) };
 }
 
 // ---- Host control writes (round advance / match finish) ----

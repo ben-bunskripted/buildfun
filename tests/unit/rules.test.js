@@ -36,8 +36,14 @@ describe("validateNewSet — number sets", () => {
     const wild = v.cards.find(c => c.isWild);
     expect(wild.representsRank).toBe("5");
   });
-  it("caps number sets at 4", () => {
+  it("allows a wild to pad beyond four naturals", () => {
     const v = validateNewSet(cards("5S", "5H", "5D", "5C", "KH"), "K");
+    expect(v.ok).toBe(true);
+    expect(v.type).toBe("number");
+    expect(v.cards).toHaveLength(5);
+  });
+  it("still rejects a duplicate natural suit", () => {
+    const v = validateNewSet(cards("5S", "5H", "5S"), "K");
     expect(v.ok).toBe(false);
   });
 });
@@ -86,9 +92,9 @@ describe("validateAddition — number sets", () => {
   it("rejects a wrong rank", () => {
     expect(validateAddition(set(), cards("6C"), "K").ok).toBe(false);
   });
-  it("rejects exceeding the cap of 4", () => {
+  it("allows a wild onto a full four-of-a-kind", () => {
     const full = numberSet("5", [natSlot("5S"), natSlot("5H"), natSlot("5D"), natSlot("5C")]);
-    expect(validateAddition(full, cards("KH"), "K").ok).toBe(false);
+    expect(validateAddition(full, cards("KH"), "K").ok).toBe(true);
   });
 });
 
