@@ -6,6 +6,7 @@ import {
   createMatch, startNextRound, beginTurn, currentPlayer, topOfDiscard,
   drawFromDeck, drawFromDiscard, placeNewSet, addToSet, swapWildcard,
   discard, isMatchOver, advanceToNextRound, matchWinnerIndex,
+  isNoWayOut, finalizeNoWayOut,
   WILDCARD_ORDER, ROUND_NAMES, TOTAL_ROUNDS, serialize, hydrate,
 } from "./game.js";
 import { validateNewSet, validateAddition, validateSwap, describeRunArrangement, describeAddition } from "./rules.js";
@@ -2156,17 +2157,30 @@ async function finalizeSwap(set, positionIndex, naturalCardId) {
 
 function afterDiscard(result) {
   persist();
-  // In online mode the server is authoritative for round-over detection —
-  // `state.phase === "roundOver"` is already set by the engine (round-win).
-  // The applyActionRemote flow already adopted the new state and called
-  // route(), so the screen has transitioned correctly. We just notify the
-  // tutorial.
+  // In online mode the server is authoritative for round-over and no-way-out
+  // detection — `state.phase === "roundOver"` is already set by the engine
+  // (round-win) or by the server's post-discard finalizeNoWayOut. The
+  // applyActionRemote flow already adopted the new state and called route(),
+  // so the screen has transitioned correctly. We just notify the tutorial
+  // and flag a no-way-out for the round-end banner.
   if (online.isActive()) {
     tutorial.notify("discard", { wonRound: state.phase === "roundOver" && state.roundWinner != null });
+    if (result.noWayOut) state.noWayOutTriggered = true;
     return;
   }
   tutorial.notify("discard", { wonRound: !!result.wonRound });
   if (result.wonRound) {
+    goRoundEnd();
+    return;
+  }
+  // Auto-detect the one genuinely unwinnable endgame (see isNoWayOut): every
+  // hand stuck at <=2 cards, all four wildcards buried with no swap to free
+  // them, and no reachable card extends any meld — only after each player has
+  // had >=3 draw-and-discard cycles this round.
+  if (isNoWayOut(state)) {
+    finalizeNoWayOut(state);
+    persist();
+    state.noWayOutTriggered = true;
     goRoundEnd();
     return;
   }
@@ -2278,14 +2292,20 @@ function onScoringSubmit() {
 function goRoundEnd() {
   showScreen("screen-round-end");
   const winnerIdx = state.roundWinner;
-  $("round-end-title").textContent = `Round ${ROUND_NAMES[state.round - 1] || state.round} complete`;
-  $("round-end-winner").innerHTML = `<strong>${escapeHTML(state.players[winnerIdx].name)}</strong> took the round.`;
+  const noWayOut = state.roundHistory[state.roundHistory.length - 1] && state.roundHistory[state.roundHistory.length - 1].noWayOut;
+  if (noWayOut) {
+    $("round-end-title").textContent = `NO WAY OUT — round ${ROUND_NAMES[state.round - 1] || state.round}`;
+    $("round-end-winner").innerHTML = `Round ended in deadlock — no winner. Everyone scores their remaining hand.`;
+  } else {
+    $("round-end-title").textContent = `Round ${ROUND_NAMES[state.round - 1] || state.round} complete`;
+    $("round-end-winner").innerHTML = `<strong>${escapeHTML(state.players[winnerIdx].name)}</strong> took the round.`;
+  }
   const tbody = $("round-end-rows");
   tbody.innerHTML = "";
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i];
     const tr = document.createElement("tr");
-    if (i === winnerIdx) tr.className = "winner-row";
+    if (!noWayOut && i === winnerIdx) tr.className = "winner-row";
     tr.innerHTML = `<td>${escapeHTML(p.name)}</td><td>${state.perRoundScores[i]}</td><td><strong>${p.score}</strong></td>`;
     tbody.appendChild(tr);
   }

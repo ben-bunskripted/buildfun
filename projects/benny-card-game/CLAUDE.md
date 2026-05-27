@@ -29,7 +29,7 @@ npm run test:e2e    # Playwright: drives index.html in a real browser
 ```
 
 - **Vitest** (`vitest.config.js`) covers `tests/unit` (rng, cards, rules, game
-  scoring, ai self-play, achievements, profiles), `tests/dom`
+  incl. No Way Out, scoring, ai self-play, achievements, profiles), `tests/dom`
   (jsdom: storage, `renderCard`) and `tests/backend` (`_engine` applyAction +
   redaction, `_lib` password/rate-limit/etc. with a mocked Neon `sql` tag).
   Shared card/meld builders are in `tests/helpers.js`.
@@ -55,7 +55,7 @@ benny-card-game/
 ├── js/
 │   ├── main.js             # UI controller, screen routing, event wiring, boot
 │   ├── cards.js            # deck model + card renderer (two render modes — see below)
-│   ├── game.js             # multiplayer/CPU match state machine
+│   ├── game.js             # multiplayer/CPU match state machine + No Way Out
 │   ├── scoring.js          # scoring-only match state
 │   ├── rules.js            # validateNewSet / validateAddition / validateSwap (pure)
 │   ├── ai.js               # CPU planTurn — enumerates plays, picks by difficulty
@@ -191,9 +191,36 @@ labels the most recent saved match with its mode name.
 A number set holds at most four *naturals* (one per suit — the duplicate-suit
 guard in `validateNewSet` / `validateAddition` enforces this), but wildcards
 can pad it beyond four. So a Benny can always be laid onto a complete
-four-of-a-kind. There is intentionally no overall cap on set size and no
-"No Way Out" dead-draw detection: a stuck round is never a true dead end while
-a reachable wildcard can extend an existing set.
+four-of-a-kind. There is intentionally no overall cap on set size.
+
+## No Way Out
+
+`isNoWayOut(state)` (game.js) declares the round a dead draw only in the one
+genuinely unwinnable endgame that survives the uncapped-set rule — since a
+reachable Benny normally rescues a stuck round. It fires only when **all four**
+of these hold, and **only after every player has completed ≥ 3 draw-and-discard
+cycles this round** (`NO_WAY_OUT_MIN_CYCLES`; tracked per player as
+`drawsThisRound`, reset each round, incremented on every `drawFromDeck` /
+`drawFromDiscard`). The gate keeps an early, transient lull from being mistaken
+for a real deadlock:
+
+1. **Nobody can open** — every player is at ≤ 2 cards. A hand only ever shrinks
+   (draw 1 / discard 1 each turn; it grows only by laying cards), so a hand
+   already ≤ 2 can never reach the 4 needed to open.
+2. **All four wildcards are buried in melds** — none sits in a hand, the deck,
+   or the discard, so no Benny can be drawn back into play.
+3. **No buried wildcard can be swapped free** — every melded wildcard's
+   matching natural is itself already on the table, so no legal swap exists to
+   pull a Benny back out (`swapFreeableWildcards` returns empty).
+4. **No reachable natural extends any meld** — every run is capped/blocked at
+   both ends and every number set is missing only already-melded suits
+   (`validateAddition` rejects every off-table natural against every meld).
+
+When all hold, the round ends as a draw via `finalizeNoWayOut(state)`:
+everyone scores their full hand (no winner zero-score) and the round-end screen
+shows a "No Way Out" banner. The check runs after each discard — in `main.js`
+for local play and in `apply-action.mjs` (server-authoritative) for online,
+which threads a `noWayOut` flag back through `online.js` for the banner.
 
 ## PWA / offline
 

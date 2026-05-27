@@ -27,6 +27,7 @@
 import { db, getUser, json, parseBody, checkBodySize, rateLimit } from "./_lib.mjs";
 import {
   applyAction, redactStateForSeat, serialize,
+  isNoWayOut, finalizeNoWayOut,
 } from "./_engine.mjs";
 
 export const handler = async (event, context) => {
@@ -67,6 +68,16 @@ export const handler = async (event, context) => {
     // out of this call. The redactor JSON-clones before sending.
     const result = applyAction(g.state, seat, action);
     if (!result.ok) return json(400, { error: result.reason || "invalid action" });
+
+    // After a discard that didn't end the round, the engine has already
+    // advanced to the next player (phase: "passing"). Check for the genuinely
+    // unwinnable endgame (see isNoWayOut) and finalize as a draw round if so.
+    // Has to happen server-side because clients can't see all hands.
+    let noWayOutTriggered = false;
+    if (action.type === "discard" && !result.wonRound && isNoWayOut(g.state)) {
+      finalizeNoWayOut(g.state);
+      noWayOutTriggered = true;
+    }
 
     // Append the (public-info-only) recorded action to last_turn.actions.
     const existing = g.last_turn || null;
@@ -115,6 +126,7 @@ export const handler = async (event, context) => {
     // drawnCard goes ONLY to the actor; it's not in lastTurn so spectators
     // never see it.
     if (result.drawnCard) out.drawnCard = result.drawnCard;
+    if (noWayOutTriggered) out.noWayOut = true;
     return json(200, out);
   } catch (err) {
     return json(500, { error: String(err && err.message || err) });

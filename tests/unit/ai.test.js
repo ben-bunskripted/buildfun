@@ -3,7 +3,7 @@ import { planTurn } from "../../projects/benny-card-game/js/ai.js";
 import {
   createMatch, startNextRound, beginTurn,
   drawFromDeck, drawFromDiscard, placeNewSet, addToSet, swapWildcard, discard,
-  serialize,
+  serialize, isNoWayOut, finalizeNoWayOut,
 } from "../../projects/benny-card-game/js/game.js";
 import { buildDeck } from "../../projects/benny-card-game/js/cards.js";
 import { freshMatch, numberSet, runSet, natSlot, wildSlot, cards } from "../helpers.js";
@@ -76,6 +76,7 @@ for (const difficulty of ["easy", "medium", "hard"]) {
         // gained a discard and control passed on.
         if (!ended) {
           expect(s.phase).toBe("passing");
+          if (isNoWayOut(s)) { finalizeNoWayOut(s); ended = true; }
         }
       }
 

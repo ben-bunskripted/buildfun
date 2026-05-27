@@ -140,6 +140,11 @@ key invariants the game enforces:
   player is prompted to choose.
 - Cards left in hand at round end score face value (J=11, Q=12, K=13,
   A=14) — wildcards count 15 regardless. Round winner scores 0.
+- **No Way Out**: the round ends as a no-winner draw (everyone scores
+  their hand) only in a true deadlock — every player stuck at ≤2 cards,
+  all four wildcards buried in melds with no swap to free them, and no
+  reachable card able to extend any meld — and only after each player has
+  taken at least 3 draw-and-discard turns that round.
 
 ## Notes
 
