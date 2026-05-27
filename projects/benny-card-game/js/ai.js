@@ -431,7 +431,11 @@ function chooseBestPlay(candidates, state, difficulty) {
   })[0];
 }
 
-function applyPlayAndAddLoop(initialState, actions, difficulty) {
+// `shed` (go-out mode): drop the positional heuristics that only matter when
+// the round continues — wildcard hoarding, wild rationing, swap preservation —
+// and just shed as many cards as possible. Used by planGoOut: emptying the
+// hand wins the round outright, so nothing else is worth optimising for.
+function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
   const wildRank = initialState.wildcardRank;
   let safety = 12;
   while (safety-- > 0) {
@@ -453,6 +457,13 @@ function applyPlayAndAddLoop(initialState, actions, difficulty) {
       const reps = [];
       for (const g of groups.values()) reps.push(chooseBestPlay(g, v, difficulty));
       reps.sort((a, b) => b.valueFreed - a.valueFreed);
+      // Go-out mode: ignore wildcard discipline entirely and play whatever
+      // sheds the most cards — emptying the hand wins the round.
+      if (shed) {
+        reps.sort((a, b) => (b.cardIds.length - a.cardIds.length) || (b.valueFreed - a.valueFreed));
+        actions.push({ type: "play", arrangement: reps[0].arrangement, narration: describePlay(reps[0].arrangement) });
+        continue;
+      }
       // Wildcard-hoard rule: never play a set whose majority is wildcards
       // unless that's literally all we have (e.g., 3 wilds + 1 natural).
       let chosen = reps.find(p => p.wildCount * 2 <= p.cardIds.length) || reps[0];
@@ -491,7 +502,7 @@ function applyPlayAndAddLoop(initialState, actions, difficulty) {
       // let the swap step (in planAfterDraw) take the benny back. Disabled in
       // the endgame: when an opponent is about to go out, shedding a card
       // (adds shrink the hand; swaps don't) matters more than the wild.
-      if (adds.length && difficulty !== "easy" && maxOpponentThreat(v) < 80) {
+      if (adds.length && difficulty !== "easy" && !shed && maxOpponentThreat(v) < 80) {
         const nonSwap = adds.filter(a => !findSwappableWildFor(me.hand.find(c => c.id === a.cardId), v.table, wildRank));
         if (nonSwap.length) adds = nonSwap;
         else break;
@@ -609,6 +620,20 @@ function planGoesOut(state, plan) {
   return v.players[v.currentPlayerIndex].hand.length === 0;
 }
 
+// Seek a line that empties the hand this turn (winning the round). Sheds as
+// many cards as possible via plays/adds — without the positional heuristics
+// that only matter when the round continues — then checks whether the forecast
+// goes out. Swaps are skipped: a 1-for-1 swap never shrinks the hand, so it
+// can't contribute to going out. `draw` is the opening draw action, or null on
+// the dealer's no-draw opening turn. Returns the winning plan, or null.
+function planGoOut(state, draw, difficulty) {
+  const actions = draw ? [draw] : [];
+  applyPlayAndAddLoop(state, actions, difficulty, true);
+  const d = chooseDiscard(virtualState(state, actions), difficulty);
+  if (d) actions.push(d);
+  return planGoesOut(state, actions) ? actions : null;
+}
+
 export function planTurn(state, difficulty) {
   const isDealerOpening = state.dealerOpeningPending && state.currentPlayerIndex === state.dealerIndex;
   const deckDraw = () => ({ type: "drawDeck", narration: "drew from the deck" });
@@ -622,6 +647,23 @@ export function planTurn(state, difficulty) {
       return actions;
     }
     return planAfterDraw(state, actions, "easy");
+  }
+
+  // Going out wins the round, so it dominates every positional heuristic
+  // (wildcard hoarding, swap preservation, defensive discards). Before the
+  // normal heuristic planning, look for a line that empties the hand this turn.
+  // Prefer one built on the discard top (public info) over a peeked deck draw.
+  if (!isDealerOpening) {
+    const top = topOfDiscard(state);
+    if (top) {
+      const g = planGoOut(state, { type: "drawDiscard", narration: `picked up ${cardLabel(top)} from the discard pile` }, difficulty);
+      if (g) return g;
+    }
+    const g = planGoOut(state, deckDraw(), difficulty);
+    if (g) return g;
+  } else {
+    const g = planGoOut(state, null, difficulty);
+    if (g) return g;
   }
 
   // Dealer's opening turn: no draw — straight to playing + discarding.

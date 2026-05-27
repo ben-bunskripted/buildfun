@@ -94,7 +94,15 @@ export async function applyOnlineOrLocal({ action, localApply }) {
     };
   }
   const r = localApply();
-  return { ok: !!(r && r.ok), reason: r && r.reason, drawnCard: null, noWayOut: false, ...((r && typeof r === "object") ? r : {}) };
+  const ok = !!(r && r.ok);
+  // Durability: persist synchronously, in the same frame the engine applied the
+  // move, before this async function resolves. The caller awaits us and only
+  // persists afterwards (a microtask later); a mobile PWA can be frozen or
+  // killed at that await boundary. Without this, a move applied in memory — e.g.
+  // a discard that ends the turn — would never reach localStorage, so on reopen
+  // the player resumes pre-move and can repeat it (discard the same card twice).
+  if (ok && cb && cb.persist) cb.persist();
+  return { ok, reason: r && r.reason, drawnCard: null, noWayOut: false, ...((r && typeof r === "object") ? r : {}) };
 }
 
 // ---- Host control writes (round advance / match finish) ----

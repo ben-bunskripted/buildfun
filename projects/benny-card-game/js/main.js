@@ -2826,6 +2826,7 @@ function initOnline() {
   online.init({
     getState: () => state,
     setState: (s) => { state = s; },
+    persist,
     stepRemoteAction: stepCpuAnimated,
     renderAll,
     showScreen,
