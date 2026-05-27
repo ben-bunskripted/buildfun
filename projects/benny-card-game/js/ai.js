@@ -431,6 +431,43 @@ function chooseBestPlay(candidates, state, difficulty) {
   })[0];
 }
 
+// Minimum natural value a play must free to justify stranding ONE wildcard on
+// the table (eased as an opponent nears going out — see the loop). A melded
+// wildcard is ~15 dead points plus our best go-out fuel, so we don't spend one
+// to lay down trivial cards.
+const WILD_KEEP_VALUE = 12;
+
+// Natural (non-wild) point value a play sheds. `valueFreed` counts each wild as
+// 15, so subtract those back out.
+function naturalValueFreed(play) {
+  return play.valueFreed - play.wildCount * 15;
+}
+
+// Rough "closeness to forming melds" for a set of hand cards: rewards duplicate
+// ranks (number-set seeds), touching / one-gap same-suit cards (run seeds), and
+// retained wildcards (which fill any blank). Used to prefer opens that leave the
+// hand best placed to go out in one move (shape-aware opening).
+function handShapeScore(cards, wildRank) {
+  const naturals = cards.filter(c => !isWildcard(c, wildRank));
+  let score = (cards.length - naturals.length) * 4; // retained wildcards are gold
+
+  const byRank = {};
+  for (const c of naturals) byRank[c.rank] = (byRank[c.rank] || 0) + 1;
+  for (const r of Object.keys(byRank)) if (byRank[r] >= 2) score += (byRank[r] - 1) * 3;
+
+  const bySuit = {};
+  for (const c of naturals) (bySuit[c.suit] = bySuit[c.suit] || []).push(rankVal(c.rank));
+  for (const suit of Object.keys(bySuit)) {
+    const vals = [...new Set(bySuit[suit])].sort((a, b) => a - b);
+    for (let i = 0; i < vals.length - 1; i++) {
+      const gap = vals[i + 1] - vals[i];
+      if (gap === 1) score += 3;      // touching → strong run seed
+      else if (gap === 2) score += 1; // one-gap → a wildcard can bridge it
+    }
+  }
+  return score;
+}
+
 // `shed` (go-out mode): drop the positional heuristics that only matter when
 // the round continues — wildcard hoarding, wild rationing, swap preservation —
 // and just shed as many cards as possible. Used by planGoOut: emptying the
@@ -464,33 +501,58 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
         actions.push({ type: "play", arrangement: reps[0].arrangement, narration: describePlay(reps[0].arrangement) });
         continue;
       }
-      // Wildcard-hoard rule: never play a set whose majority is wildcards
-      // unless that's literally all we have (e.g., 3 wilds + 1 natural).
-      let chosen = reps.find(p => p.wildCount * 2 <= p.cardIds.length) || reps[0];
-      // Wildcard rationing for HARD: if we hold 3+ wildcards in total AND
-      // the chosen play would dump 2+ of them, prefer a less wild-heavy
-      // alternative even if it frees fewer points. Endgame disables this —
-      // if an opponent is about to go out, shedding cards beats hoarding.
-      if (difficulty === "hard" && maxOpponentThreat(v) < 80) {
-        const wildsInHand = me.hand.filter(c => isWildcard(c, wildRank)).length;
-        if (wildsInHand >= 3 && chosen.wildCount >= 2) {
-          const leaner = reps.find(p => p.wildCount < chosen.wildCount);
-          if (leaner) chosen = leaner;
-        }
-      }
-      // Endgame: when an opponent is one card from going out, prefer the
-      // play that frees the most cards (not just the most points) so we
-      // either catch up on the race or minimise residual hand value.
-      if (difficulty === "hard" && maxOpponentThreat(v) >= 80) {
-        reps.sort((a, b) => {
-          const dn = b.cardIds.length - a.cardIds.length;
-          if (dn !== 0) return dn;
-          return b.valueFreed - a.valueFreed;
-        });
+      // Not going out this turn — decide which set (if any) is worth laying.
+      const threat = maxOpponentThreat(v);
+      const endgame = threat >= 80;
+      let chosen = null;
+
+      if (difficulty === "easy") {
+        // Easy stays simple: least wild-heavy option, else the top play.
+        chosen = reps.find(p => p.wildCount * 2 <= p.cardIds.length) || reps[0];
+      } else if (endgame) {
+        // An opponent is about to go out: shed the most cards (and value) we
+        // can — wildcards included — since minimising what we're caught
+        // holding beats hoarding flexibility for a round that's ending now.
+        reps.sort((a, b) => (b.cardIds.length - a.cardIds.length) || (b.valueFreed - a.valueFreed));
         chosen = reps[0];
+      } else {
+        // #1 Hard floor: never lay a set that's majority wildcards — burying
+        // 2-3 bennies to put down a card or two strands 15-point cards and our
+        // best go-out fuel.
+        let cands = reps.filter(p => p.wildCount * 2 <= p.cardIds.length);
+        // #2 Wildcards are keep-cards (HARD): only spend a wild on a set that
+        // frees enough real (natural) value to justify stranding it. The bar
+        // eases as an opponent closes in (threat) so we loosen up rather than
+        // hoard into a loss; wild-free plays always qualify.
+        if (difficulty === "hard") {
+          const bar = WILD_KEEP_VALUE * (1 - Math.min(1, threat / 100));
+          cands = cands.filter(p => p.wildCount === 0 || naturalValueFreed(p) >= p.wildCount * bar);
+        }
+        if (cands.length) {
+          if (difficulty === "hard") {
+            // #3 Shape-aware open: among worthwhile plays, prefer the one that
+            // frees good value AND leaves the best-shaped remaining hand —
+            // pairs and adjacent-suited cards that can still grow into a
+            // one-shot go-out. Runs are nudged since they keep taking adds.
+            let best = -Infinity;
+            for (const p of cands) {
+              const ids = new Set(p.cardIds);
+              const remaining = me.hand.filter(c => !ids.has(c.id));
+              const score = p.valueFreed + handShapeScore(remaining, wildRank) + (p.kind === "run" ? 2 : 0);
+              if (score > best) { best = score; chosen = p; }
+            }
+          } else {
+            chosen = cands[0]; // medium: highest-value non-wild-heavy play
+          }
+        }
+        // cands empty -> chosen stays null: hold the wilds/shape and develop.
       }
-      actions.push({ type: "play", arrangement: chosen.arrangement, narration: describePlay(chosen.arrangement) });
-      continue;
+
+      if (chosen) {
+        actions.push({ type: "play", arrangement: chosen.arrangement, narration: describePlay(chosen.arrangement) });
+        continue;
+      }
+      // Nothing worth opening with — fall through to adds (if opened), then discard.
     }
 
     if (me.hasOpened) {
