@@ -136,13 +136,13 @@ function enumerateNewSets(hand, wildRank, table = []) {
     });
   }
 
-  // Number sets — naturals of one rank + 0..k wildcards, total 3..4.
+  // Number sets — naturals of one rank + 0..k wildcards, total >= 3.
   for (const rank of Object.keys(byRank)) {
     if (rank === wildRank) continue;
     if (tableRanks.has(rank)) continue;
     const naturals = byRank[rank];
     for (let useNat = naturals.length; useNat >= 1; useNat--) {
-      for (let useWild = 0; useWild <= wilds.length && useNat + useWild <= 4; useWild++) {
+      for (let useWild = 0; useWild <= wilds.length; useWild++) {
         if (useNat + useWild < 3) continue;
         const cards = naturals.slice(0, useNat).concat(wilds.slice(0, useWild));
         const v = validateNewSet(cards, wildRank);
@@ -515,7 +515,7 @@ function applyPlayAndAddLoop(initialState, actions, difficulty) {
 function describePlay(arrangement) {
   if (arrangement.type === "number") {
     const n = arrangement.cards.length;
-    return `played ${arrangement.rank}-${arrangement.rank}-${arrangement.rank}${n === 4 ? `-${arrangement.rank}` : ""}`;
+    return `played ${Array(n).fill(arrangement.rank).join("-")}`;
   }
   const seq = arrangement.cards.map(c => c.isWild ? `W=${c.representsRank}` : c.representsRank).join("-");
   return `played ${seq} of ${SUIT_GLYPH[arrangement.suit]}`;

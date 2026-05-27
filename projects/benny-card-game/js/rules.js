@@ -35,10 +35,6 @@ export function validateNewSet(rawCards, wildcardRank) {
   const ranks = new Set(naturals.map(a => a.card.rank));
   if (ranks.size === 1) {
     const r = naturals[0].card.rank;
-    const n = annotated.length;
-    if (n > 4) {
-      return { ok: false, reason: "A number set is capped at 4 cards (one per suit)." };
-    }
     // Reject duplicate suits among natural cards (impossible with one deck, but guard).
     const naturalSuits = naturals.map(a => a.card.suit);
     if (new Set(naturalSuits).size !== naturalSuits.length) {
@@ -151,10 +147,6 @@ export function validateAddition(set, rawCards, wildcardRank) {
   const annotated = rawCards.map(c => annotate(c, wildcardRank));
 
   if (set.type === "number") {
-    const newLen = set.cards.length + annotated.length;
-    if (newLen > 4) {
-      return { ok: false, reason: "Number sets are capped at 4 cards." };
-    }
     // Every natural card must match the set's rank; no duplicate suits with existing.
     const existingSuits = new Set(set.cards.filter(c => !c.isWild).map(c => c.card.suit));
     for (const a of annotated) {

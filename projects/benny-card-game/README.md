@@ -133,15 +133,18 @@ key invariants the game enforces:
   `A,2,3,4,5,6,7,8,9,10,J,Q,K,A`.
 - Dealer opens with 8 cards, **no draw**, may play sets / add / swap, must
   discard. Subsequent turns: draw → optional plays → discard.
-- Number sets capped at 4 cards (including wildcards). Suited runs use low
-  or high Ace but never wrap. Pairs are rejected.
+- Number sets hold at most four naturals (one per suit) but wildcards can
+  pad them further, so a Benny can always join a four-of-a-kind. Suited runs
+  use low or high Ace but never wrap. Pairs are rejected.
 - A wildcard in an unambiguous run position auto-resolves; otherwise the
   player is prompted to choose.
 - Cards left in hand at round end score face value (J=11, Q=12, K=13,
   A=14) — wildcards count 15 regardless. Round winner scores 0.
-- **No Way Out**: if neither the deck nor the discard pile can produce
-  a legal move for anyone (no opener, no addition, no swap), the round
-  ends as a draw — everyone scores their hand, nobody wins the round.
+- **No Way Out**: the round ends as a no-winner draw (everyone scores
+  their hand) only in a true deadlock — every player stuck at ≤2 cards,
+  all four wildcards buried in melds with no swap to free them, and no
+  reachable card able to extend any meld — and only after each player has
+  taken at least 3 draw-and-discard turns that round.
 
 ## Notes
 

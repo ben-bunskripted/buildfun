@@ -29,6 +29,7 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
       score: 0,
       hand: [],
       hasOpened: false,
+      drawsThisRound: 0, // draw-and-discard cycles this round; gates No Way Out
       kind: kinds[i] || "human",
       difficulty: kinds[i] === "cpu" ? (diffs[i] || "medium") : undefined,
       memory: kinds[i] === "cpu" ? [] : undefined, // discard-pile observations (Hard AI)
@@ -73,6 +74,7 @@ export function startNextRound(state, opts = {}) {
   for (const p of state.players) {
     p.hand = [];
     p.hasOpened = false;
+    p.drawsThisRound = 0;
   }
 
   // Deal 7 to each, then 1 extra to dealer.
@@ -119,7 +121,9 @@ export function drawFromDeck(state) {
     state.discardPile = [top];
   }
   const card = state.deck.shift();
-  currentPlayer(state).hand.push(card);
+  const p = currentPlayer(state);
+  p.hand.push(card);
+  p.drawsThisRound = (p.drawsThisRound || 0) + 1;
   state.lastDrawnCardId = card.id;
   state.phase = "canAct";
   return { ok: true, card };
@@ -129,7 +133,9 @@ export function drawFromDiscard(state) {
   if (state.phase !== "mustDraw") return { ok: false, reason: "You can't draw right now." };
   if (!state.discardPile.length) return { ok: false, reason: "Discard pile is empty." };
   const card = state.discardPile.pop();
-  currentPlayer(state).hand.push(card);
+  const p = currentPlayer(state);
+  p.hand.push(card);
+  p.drawsThisRound = (p.drawsThisRound || 0) + 1;
   state.lastDrawnCardId = card.id;
   state.phase = "canAct";
   return { ok: true, card };
@@ -391,31 +397,26 @@ export function isMatchOver(state) {
 
 // ---------- No Way Out detection ----------
 //
-// A round is a dead draw only when nobody can ever empty their hand. Two
-// conditions must hold together:
-//
-//   1. No hand can open a new set. Opening lays down >=3 cards while keeping
-//      one to discard (placeNewSet), so it needs >=4 cards in hand. A hand only
-//      ever grows by the single card drawn each turn, so any hand of <3 cards
-//      can never reach 4 — it can never open, whatever it draws.
-//   2. No meld can be extended by a reachable card. Every card not currently
-//      melded counts as reachable: drawFromDeck recycles the discard pile, so
-//      anything in a hand, the deck, or the discard is eventually drawable. That
-//      pool also includes wildcards a single swap could free — swap a table
-//      wildcard for its off-table natural, then add the freed wildcard to an
-//      open run. Capped number sets and runs with no reachable extender stay
-//      frozen; an incomplete set (its missing suit-card is always off-table) or
-//      an open-ended run does not.
+// A round is declared a dead draw only in the one genuinely unwinnable
+// endgame that survives the uncapped-number-set rule. With wildcards free to
+// pad any set, a Benny can normally rescue a stuck round — so we fire ONLY
+// when all four of the conditions below hold at once, AND only after every
+// player has had time to act (each must have completed >= NO_WAY_OUT_MIN_CYCLES
+// draw-and-discard cycles this round). The gate keeps an early, transient
+// lull from being mistaken for a true deadlock.
+const NO_WAY_OUT_MIN_CYCLES = 3;
 
-// Every card not currently melded on the table.
+// Every card not currently melded on the table. The deck recycles the discard
+// pile (drawFromDeck), so anything in a hand, the deck, or the discard is
+// eventually drawable — i.e. reachable.
 function offTableCards(state) {
   const onTable = new Set();
   for (const s of state.table) for (const c of s.cards) onTable.add(c.card.id);
   return buildDeck().filter(c => !onTable.has(c.id));
 }
 
-// Wildcards a single swap could pull off the table into a hand: a melded
-// wildcard whose matching natural is still off-table (making the swap legal).
+// Melded wildcards a single legal swap could pull back into play: a table
+// wildcard whose matching natural is still off-table (so the swap validates).
 function swapFreeableWildcards(state, offTable) {
   const wild = state.wildcardRank;
   const freed = [];
@@ -428,24 +429,39 @@ function swapFreeableWildcards(state, offTable) {
   return freed;
 }
 
-function anyMeldExtendable(state) {
-  const wild = state.wildcardRank;
-  const offTable = offTableCards(state);
-  const candidates = offTable.concat(swapFreeableWildcards(state, offTable));
-  for (const s of state.table) {
-    for (const c of candidates) {
-      if (validateAddition(s, [c], wild).ok) return true;
-    }
-  }
-  return false;
-}
-
 export function isNoWayOut(state) {
   if (state.phase === "roundOver") return false;
   if (state.dealerOpeningPending) return false;
   if (state.table.length === 0) return false;
-  if (state.players.some(p => p.hand.length >= 3)) return false;
-  if (anyMeldExtendable(state)) return false;
+
+  // Gate: every player must have completed >= 3 draw-and-discard cycles this
+  // round before any dead-draw can be declared.
+  if (state.players.some(p => (p.drawsThisRound || 0) < NO_WAY_OUT_MIN_CYCLES)) return false;
+
+  // Criterion 1 — nobody can open. A hand only ever shrinks (draw 1, discard 1
+  // each turn; it grows only by laying cards down), so any hand already at <=2
+  // cards can never reach the 4 needed to open. Every player must be there.
+  if (state.players.some(p => p.hand.length > 2)) return false;
+
+  // Criterion 2 — all four wildcards are buried in melds: none sits in a hand,
+  // the deck, or the discard, so no Benny can ever be drawn back into play.
+  const offTable = offTableCards(state);
+  if (offTable.some(c => isWildcard(c, state.wildcardRank))) return false;
+
+  // Criterion 3 — no buried wildcard can be swapped free: every melded
+  // wildcard's matching natural is itself already on the table, so no legal
+  // swap exists to pull a Benny back out.
+  if (swapFreeableWildcards(state, offTable).length > 0) return false;
+
+  // Criterion 4 — no reachable natural extends any meld: every run is capped or
+  // blocked at both ends, and every number set is missing only suits that are
+  // themselves already melded. (offTable holds only naturals here, per #2.)
+  const wild = state.wildcardRank;
+  for (const s of state.table) {
+    for (const c of offTable) {
+      if (validateAddition(s, [c], wild).ok) return false;
+    }
+  }
   return true;
 }
 
@@ -468,7 +484,7 @@ export function finalizeNoWayOut(state) {
     cumulative: state.players.map(p => p.score),
     noWayOut: true,
   });
-  if (!state.matchEvents) state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [] };
+  ensureMatchEvents(state);
   state.matchEvents.rounds.push({
     round: state.round,
     wildcardRank: state.wildcardRank,

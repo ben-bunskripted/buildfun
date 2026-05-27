@@ -2173,9 +2173,10 @@ function afterDiscard(result) {
     goRoundEnd();
     return;
   }
-  // Auto-detect a deadlocked round (no runs, all number sets capped, and no
-  // hand can form a new set). Cheaper than scanning every action — discards
-  // are the only state change that can lock down the rank-set count.
+  // Auto-detect the one genuinely unwinnable endgame (see isNoWayOut): every
+  // hand stuck at <=2 cards, all four wildcards buried with no swap to free
+  // them, and no reachable card extends any meld — only after each player has
+  // had >=3 draw-and-discard cycles this round.
   if (isNoWayOut(state)) {
     finalizeNoWayOut(state);
     persist();

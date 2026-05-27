@@ -70,9 +70,9 @@ export const handler = async (event, context) => {
     if (!result.ok) return json(400, { error: result.reason || "invalid action" });
 
     // After a discard that didn't end the round, the engine has already
-    // advanced to the next player (phase: "passing"). Check for a deadlock
-    // (no legal play for anyone, table fully capped) and finalize as a draw
-    // round if so. Has to happen server-side because clients can't see hands.
+    // advanced to the next player (phase: "passing"). Check for the genuinely
+    // unwinnable endgame (see isNoWayOut) and finalize as a draw round if so.
+    // Has to happen server-side because clients can't see all hands.
     let noWayOutTriggered = false;
     if (action.type === "discard" && !result.wonRound && isNoWayOut(g.state)) {
       finalizeNoWayOut(g.state);
