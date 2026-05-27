@@ -157,6 +157,57 @@ describe("planTurn — hard: swap a benny out instead of padding a set", () => {
   });
 });
 
+describe("planTurn — hard: going out beats wildcard recovery", () => {
+  it("picks up and adds the discard top to win rather than swapping a benny", () => {
+    // We're down to a single card (2D). The discard top (8S) both extends the
+    // run 5-6-7♠ AND could swap the wildcard out of the 8-set. The greedy
+    // wildcard-recovery heuristic would swap and leave us holding a card — but
+    // picking up 8S, adding it, then discarding 2D empties our hand and WINS.
+    // Going out must dominate every positional heuristic.
+    const s = turnFixture({
+      hand: ["2D"],
+      table: [
+        runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 0 }),
+        numberSet("8", [natSlot("8H"), natSlot("8C"), wildSlot("KD", "8")], { id: "set1", ownerIndex: 0 }),
+      ],
+      discardTop: "8S",
+    });
+    const plan = planTurn(s, "hard");
+    expect(plan[0].type).toBe("drawDiscard");
+    expect(plan.some(a => a.type === "swap")).toBe(false);
+
+    // The whole plan, applied through the real engine, must empty the hand.
+    beginTurn(s);
+    let won = false;
+    for (const a of plan) {
+      const r = applyAction(s, a);
+      expect(r.ok).toBe(true);
+      if (a.type === "discard" && r.wonRound) won = true;
+    }
+    expect(won).toBe(true);
+    expect(s.players[0].hand.length).toBe(0);
+  });
+
+  it("goes out via a deck draw when that is the only winning line", () => {
+    // 8S is on top of the deck (drawn), completing 5-6-7♠ → discard 2D to win.
+    const s = turnFixture({
+      hand: ["2D"],
+      table: [runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 0 })],
+      deckTop: "8S",
+      discardTop: "QH",
+    });
+    const plan = planTurn(s, "hard");
+    beginTurn(s);
+    let won = false;
+    for (const a of plan) {
+      const r = applyAction(s, a);
+      expect(r.ok).toBe(true);
+      if (a.type === "discard" && r.wonRound) won = true;
+    }
+    expect(won).toBe(true);
+  });
+});
+
 describe("planTurn — dealer opening turn", () => {
   it("opens without drawing (the dealer's first turn has no draw)", () => {
     const s = makeCpuMatch(3, "hard");
