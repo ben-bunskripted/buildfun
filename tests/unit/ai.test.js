@@ -268,6 +268,54 @@ describe("planTurn — hard: shape-aware opening", () => {
   });
 });
 
+describe("planTurn — hard: threat-aware wildcard holding on discard", () => {
+  function discardFixture(oppHand, table = []) {
+    const s = freshMatch(["Me", "Opp"], { wildcardRank: "K" });
+    s.dealerOpeningPending = false;
+    s.currentPlayerIndex = 0;
+    s.players[0].hasOpened = false;
+    // A benny (KC) + one low natural; after drawing an inert low card there's
+    // no meld to make, so the turn comes down to which card to discard.
+    s.players[0].hand = cards("KC", "5H");
+    s.players[1].hand = oppHand;
+    s.table = table;
+    s.deck = cards("2D");          // inert draw
+    s.discardPile = cards("9C");   // inert top
+    return s;
+  }
+
+  it("holds the wildcard while opponents are healthy (dumps a natural)", () => {
+    const s = discardFixture(cards("2H", "3H", "4H", "5H", "6H", "7H")); // low threat
+    const plan = planTurn(s, "hard");
+    const discard = plan.find(a => a.type === "discard");
+    expect(discard.cardId).not.toBe("KC");
+  });
+
+  it("discards the wildcard when an opponent is about to go out", () => {
+    // Opponent on a single card → endgame. No opponent meld on the table, so
+    // dumping the benny doesn't gift an extension; holding it would just be
+    // 15 points caught when they go out.
+    const s = discardFixture(cards("2H"));
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    const discard = plan.find(a => a.type === "discard");
+    expect(discard.cardId).toBe("KC");
+  });
+
+  it("keeps the wildcard even in the endgame if dumping would extend an opponent meld", () => {
+    // Opponent on one card AND owns a run the benny could extend — gifting it
+    // could hand them the win, so hold it despite the endgame.
+    const s = discardFixture(
+      cards("2H"),
+      [runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 1 })],
+    );
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    const discard = plan.find(a => a.type === "discard");
+    expect(discard.cardId).not.toBe("KC");
+  });
+});
+
 describe("planTurn — dealer opening turn", () => {
   it("opens without drawing (the dealer's first turn has no draw)", () => {
     const s = makeCpuMatch(3, "hard");

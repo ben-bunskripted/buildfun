@@ -297,12 +297,12 @@ function chooseDiscard(state, difficulty) {
   if (!me.hand.length) return null;
   const wildRank = state.wildcardRank;
   const nonWild = me.hand.filter(c => !isWildcard(c, wildRank));
-  const pool = nonWild.length ? nonWild : me.hand;
 
   if (difficulty === "easy") {
     // Sample uniformly from the bottom-quartile-value cards (no wilds when
     // possible), so the easy CPU still mostly dumps low-value clutter but
     // doesn't always pick the single cheapest card.
+    const pool = nonWild.length ? nonWild : me.hand;
     const sorted = pool.slice().sort((a, b) => pointValue(a, wildRank) - pointValue(b, wildRank));
     const cutoff = Math.max(1, Math.ceil(sorted.length * 0.35));
     const slice = sorted.slice(0, cutoff);
@@ -322,6 +322,13 @@ function chooseDiscard(state, difficulty) {
   // endgame so the CPU stops gifting adds even at the cost of higher hand
   // value remaining.
   const threatMult = 1 + Math.min(1, threat / 100);
+
+  // Wildcards are normally never discarded while we hold a natural — they're
+  // our go-out fuel. But once an opponent is about to go out (endgame), a wild
+  // we couldn't meld is just 15 points we'll be caught holding, so make it
+  // eligible to discard. The gift penalty below still steers us away from
+  // handing a wild to an opponent whose meld it would extend.
+  const pool = (nonWild.length && !endgame) ? nonWild : me.hand;
 
   // Per-opponent rank profiles (HARD only). A rank an opponent has never
   // discarded — when they've had a chance to — is suspicious.
