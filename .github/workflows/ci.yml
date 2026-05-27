@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  cache-bump:
+    name: Service-worker cache bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Ensure the SW cache is bumped when shell files change
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/check-cache-bump.mjs
