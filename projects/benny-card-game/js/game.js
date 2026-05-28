@@ -13,10 +13,14 @@ export const STATE_VERSION = 1;
 
 // createMatch(playerNames, dealerIndex)
 //   — legacy: all players are "human", mode "multiplayer".
-// createMatch(playerNames, dealerIndex, { mode, playerKinds, difficulties })
+// createMatch(playerNames, dealerIndex, { mode, playerKinds, difficulties, hideWildLabel })
 //   — opts.mode: "multiplayer" | "cpu"
 //   — opts.playerKinds: array of "human" | "cpu", aligned with playerNames
 //   — opts.difficulties: array of "easy" | "medium" | "hard" | undefined (cpu only)
+//   — opts.hideWildLabel: per-match cosmetic — hide the WILD banner/tint so
+//     wildcards look like ordinary cards. Chosen before the match starts and
+//     fixed for its duration; stored on state.options so it serializes with
+//     the save and (online) reaches every seat via the redacted state.
 export function createMatch(playerNames, dealerIndex, opts = {}) {
   const mode = opts.mode || "multiplayer";
   const kinds = opts.playerKinds || playerNames.map(() => "human");
@@ -24,6 +28,8 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
   return {
     version: STATE_VERSION,
     mode,
+    // Per-match options chosen at setup (fixed for the match). See opts above.
+    options: { hideWildLabel: !!opts.hideWildLabel },
     players: playerNames.map((name, i) => ({
       name,
       score: 0,

@@ -56,6 +56,14 @@ describe("compareForSort", () => {
     hand.sort((a, b) => compareForSort(a, b, "7"));
     expect(hand[0].id).toBe("7H");
   });
+
+  it("does NOT float the wildcard when no wild rank is given (hide-wild sort)", () => {
+    // The hide-wild option sorts with a null wild rank so the wildcard sits in
+    // its natural rank/suit position rather than betraying itself at the front.
+    const hand = [card("AS"), card("7H"), card("KS")];
+    hand.sort((a, b) => compareForSort(a, b, null));
+    expect(hand.map(c => c.id)).toEqual(["AS", "KS", "7H"]);
+  });
 });
 
 describe("point tables", () => {

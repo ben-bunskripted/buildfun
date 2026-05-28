@@ -109,6 +109,8 @@ export function buildMatchSummary(state) {
     roundHistory,
     matchEvents,
     dealerIndex: state.dealerIndex,
+    // Per-match option — gates the "wild label off" achievements.
+    hideWildLabel: !!(state.options && state.options.hideWildLabel),
   };
 }
 

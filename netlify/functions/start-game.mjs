@@ -67,10 +67,13 @@ export const handler = async (event, context) => {
     // earlier float-division approach could return seats.length on the 1-in-
     // 2^32 chance buf[0] === 0xffffffff (Math.floor(N * 1.0) === N).
     const dealerIndex = randomInt(seats.length);
-    const state = createMatch(names, dealerIndex, { mode: "online" });
-    // Carry the host's match options onto the canonical state. redactStateForSeat
-    // deep-clones the whole object, so every seat receives them via get-room.
-    state.options = { hideWildLabel: !!seededOptions.hideWildLabel };
+    // Carry the host's match options onto the canonical state. createMatch
+    // stores them on state.options; redactStateForSeat deep-clones the whole
+    // object, so every seat receives them via get-room.
+    const state = createMatch(names, dealerIndex, {
+      mode: "online",
+      hideWildLabel: !!seededOptions.hideWildLabel,
+    });
     startNextRound(state);
 
     const currentSeat = state.currentPlayerIndex;

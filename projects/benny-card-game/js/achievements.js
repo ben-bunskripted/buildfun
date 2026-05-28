@@ -276,6 +276,26 @@ export const ACHIEVEMENTS = [
     },
   },
 
+  // ---- Wild label off (only earnable in matches set up with the WILD
+  //      banner hidden — see state.options.hideWildLabel, surfaced on the
+  //      summary as summary.hideWildLabel) ----
+  {
+    id: "flying_blind", name: "Flying Blind", icon: "🙈", category: "wild", modes: PLAY_MODES,
+    description: "Win a match with the wild label hidden.",
+    evaluate: ({ player, summary }) => !!summary.hideWildLabel && player.isWinner,
+  },
+  {
+    id: "sixth_sense", name: "Sixth Sense", icon: "🔮", category: "wild", modes: PLAY_MODES,
+    description: "Win a round with the wild label hidden.",
+    evaluate: ({ player, summary }) =>
+      !!summary.hideWildLabel && roundsWonByPlayer(summary.roundHistory, player.idx) >= 1,
+  },
+  {
+    id: "minds_eye", name: "Mind's Eye", icon: "🧠", category: "wild", modes: PLAY_MODES,
+    description: "Finish under 20 points with the wild label hidden.",
+    evaluate: ({ player, summary }) => !!summary.hideWildLabel && player.finalScore < 20,
+  },
+
   // ---- Lifetime / meta (any mode — but counted per-mode) ----
   {
     id: "first_blood", name: "First Blood", icon: "🩸", category: "meta", modes: ALL_MODES,

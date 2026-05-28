@@ -60,6 +60,26 @@ describe("card-detail achievements", () => {
   });
 });
 
+describe("wild-label-off achievements", () => {
+  it("flying_blind / sixth_sense / minds_eye when the wild label was hidden", () => {
+    const ids = earnedFor(0, summary({ hideWildLabel: true }));
+    expect(ids).toContain("flying_blind"); // winner
+    expect(ids).toContain("sixth_sense");  // won round 1
+    expect(ids).toContain("minds_eye");    // finalScore 0 < 20
+  });
+  it("are NOT earned when the wild label was shown", () => {
+    const ids = earnedFor(0, summary({ hideWildLabel: false }));
+    expect(ids).not.toContain("flying_blind");
+    expect(ids).not.toContain("sixth_sense");
+    expect(ids).not.toContain("minds_eye");
+  });
+  it("flying_blind needs the win; a hidden-label loser doesn't get it", () => {
+    const ids = earnedFor(1, summary({ hideWildLabel: true }));
+    expect(ids).not.toContain("flying_blind"); // P1 lost
+    expect(ids).not.toContain("sixth_sense");  // P1 won no rounds
+  });
+});
+
 describe("registry sanity", () => {
   it("every achievement has a unique id and an evaluate fn", () => {
     const ids = ACHIEVEMENTS.map(a => a.id);
