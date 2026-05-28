@@ -30,6 +30,12 @@ export const handler = async (event, context) => {
 
     const max = Number(rooms[0].max_players || 4);
 
+    // Match options the host seeded at create time (create-room stashes them in
+    // the lobby games row's state). Rooms created before this existed have a
+    // null/optionless state — default everything off.
+    const seeded = await sql`SELECT state FROM games WHERE room_id = ${code}`;
+    const seededOptions = (seeded[0] && seeded[0].state && seeded[0].state.options) || {};
+
     // Flip the room to "playing" FIRST, guarded on it still being a lobby.
     // Once this lands, `join-room`'s `status === 'lobby'` check will reject
     // any racing joiner — without that we could read seats here, deal those
@@ -62,6 +68,9 @@ export const handler = async (event, context) => {
     // 2^32 chance buf[0] === 0xffffffff (Math.floor(N * 1.0) === N).
     const dealerIndex = randomInt(seats.length);
     const state = createMatch(names, dealerIndex, { mode: "online" });
+    // Carry the host's match options onto the canonical state. redactStateForSeat
+    // deep-clones the whole object, so every seat receives them via get-room.
+    state.options = { hideWildLabel: !!seededOptions.hideWildLabel };
     startNextRound(state);
 
     const currentSeat = state.currentPlayerIndex;

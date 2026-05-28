@@ -1006,6 +1006,18 @@ body.hand-dragging textarea {
   .card.is-wild .wild-banner { width: 64%; padding: 5px 10px; }
 }
 
+/* "Hide wild label" option. When the root carries .hide-wild, wildcards
+   (Bennys) render as ordinary cards — the gold tint and the WILD banner are
+   both suppressed so they're indistinguishable at a glance. The .is-wild class
+   stays on the element (drag-to-swap detection in main.js keys off it); only
+   the visual tells are removed. The override values mirror the base .card rule. */
+html.hide-wild .card.is-wild {
+  background: #fff;
+  border-color: rgba(0,0,0,0.10);
+  box-shadow: var(--shadow-sm);
+}
+html.hide-wild .card.is-wild .wild-banner { display: none; }
+
 /* Meld cards inherit hand-card size — no overrides. */
 
 /* ---------- Round end / Match end ---------- */

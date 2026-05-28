@@ -112,4 +112,13 @@ describe("redactStateForSeat", () => {
     redactStateForSeat(s, 1);
     expect(JSON.stringify(s)).toBe(snap);
   });
+  it("preserves match options (e.g. hideWildLabel) so every seat gets them", () => {
+    const s = dealtMatch();
+    // start-game.mjs folds the host's choice onto the canonical state.
+    s.options = { hideWildLabel: true };
+    const view0 = redactStateForSeat(s, 0);
+    const view1 = redactStateForSeat(s, 1);
+    expect(view0.options).toEqual({ hideWildLabel: true });
+    expect(view1.options).toEqual({ hideWildLabel: true });
+  });
 });

@@ -72,6 +72,12 @@ let ui = {
   // recap modal. Persisted as prefs.animateCpu. New users default to on; saved
   // prefs override.
   animateCpu: true,
+  // When true, the gold WILD banner + tint on wildcards (Bennys) is hidden so
+  // they look like ordinary cards — harder to read. Persisted as
+  // prefs.hideWildLabel. This per-device pref drives local modes (solo /
+  // multiplayer); online matches instead read the host's per-room choice from
+  // state.options (see effectiveHideWildLabel).
+  hideWildLabel: false,
 };
 
 const CARD_SIZE_VALUES = new Set(["s", "m", "l", "xl"]);
@@ -104,6 +110,29 @@ function setCardSize(size) {
   if (typeof layoutHand === "function") layoutHand();
 }
 
+// "Hide wild label" — when on, wildcards (Bennys) render as ordinary cards.
+// Local modes (solo / multiplayer) read the per-device pref `ui.hideWildLabel`,
+// toggled from the in-game menu. Online matches instead read the host's
+// per-room choice, baked into `state.options.hideWildLabel` at create time and
+// delivered to every seat via the redacted game state — so the whole table
+// sees the same board. Implemented as a root <html> class so flipping it
+// restyles every already-rendered card instantly, with no re-render.
+function effectiveHideWildLabel() {
+  if (state && state.mode === "online" && state.options) {
+    return !!state.options.hideWildLabel;
+  }
+  return !!ui.hideWildLabel;
+}
+function applyHideWildLabel() {
+  document.documentElement.classList.toggle("hide-wild", effectiveHideWildLabel());
+}
+function syncHideWildToggleLabel() {
+  const btn = $("hide-wild-toggle-btn");
+  if (!btn) return;
+  btn.textContent = ui.hideWildLabel ? "Hide wild label: On" : "Hide wild label: Off";
+  btn.setAttribute("aria-pressed", String(!!ui.hideWildLabel));
+}
+
 // Apply persisted card style preference before any cards are rendered.
 {
   const prefs = loadPrefs();
@@ -123,8 +152,12 @@ function setCardSize(size) {
   if (typeof prefs.animateCpu === "boolean") {
     ui.animateCpu = prefs.animateCpu;
   }
+  if (typeof prefs.hideWildLabel === "boolean") {
+    ui.hideWildLabel = prefs.hideWildLabel;
+  }
   setCardStyle(ui.cardStyle);
   applyCardSizePref(ui.cardSize);
+  applyHideWildLabel();
 }
 
 // ---------- Persistence ----------
@@ -1146,6 +1179,9 @@ async function stepCpuAnimated(action) {
 
 // ---------- Play screen rendering ----------
 function renderAll() {
+  // Online matches carry the host's choice on state.options; refresh the root
+  // class each render so a spectator adopting fresh server state reflects it.
+  applyHideWildLabel();
   renderTopBar();
   renderAllMelds();
   renderMiddle();
@@ -1531,6 +1567,12 @@ const MENU_ACTIONS = {
     syncFanToggleLabel();
     if (typeof layoutHand === "function") layoutHand();
   },
+  "hide-wild": () => {
+    ui.hideWildLabel = !ui.hideWildLabel;
+    savePrefs({ ...loadPrefs(), hideWildLabel: ui.hideWildLabel });
+    syncHideWildToggleLabel();
+    applyHideWildLabel();
+  },
   "archive-online": confirmArchiveCurrent,
   "end-online": confirmEndCurrent,
 };
@@ -1615,6 +1657,11 @@ function syncOnlineMenuVisibility(list) {
   const endBtn = list.querySelector("[data-action='end-online']");
   if (archiveBtn) archiveBtn.classList.toggle("hidden", !(inSession && !isHost));
   if (endBtn) endBtn.classList.toggle("hidden", !(inSession && isHost));
+  // "Hide wild label" is a per-device toggle for local modes only — online
+  // tables take the host's choice set at match setup, so hide it in session.
+  const hideWildBtn = list.querySelector("[data-action='hide-wild']");
+  if (hideWildBtn) hideWildBtn.classList.toggle("hidden", inSession);
+  syncHideWildToggleLabel();
 }
 document.addEventListener("click", (e) => {
   // Card size segs (start screen + both hamburger menus) all route through
@@ -2819,6 +2866,9 @@ function applyUserName(name) {
 // ---------- Online multiplayer ----------
 let onlineVisibility = "public";
 let onlineMaxPlayers = 4;
+// Host's "hide wild label" choice for a new table, set in the create form.
+// Applies to every seat once the match deals (carried on state.options).
+let onlineHideWildLabel = false;
 
 // Hand main.js's state + renderers to the online controller. online.js never
 // imports these directly because `state` and the DOM helpers are module-private.
@@ -2881,6 +2931,17 @@ function buildOnlineUI() {
       btn.classList.add("active");
       const n = Number(btn.dataset.max);
       onlineMaxPlayers = (n >= 2 && n <= 4) ? n : 4;
+    });
+  }
+
+  const hideWildSeg = $("online-hide-wild");
+  if (hideWildSeg) {
+    hideWildSeg.addEventListener("click", (e) => {
+      const btn = e.target.closest(".seg-btn");
+      if (!btn) return;
+      hideWildSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      onlineHideWildLabel = btn.dataset.hidewild === "on";
     });
   }
 
@@ -3170,6 +3231,7 @@ async function onlineCreate() {
     password: $("online-room-password").value,
     displayName: onlineDisplayName(),
     maxPlayers: onlineMaxPlayers,
+    hideWildLabel: onlineHideWildLabel,
   };
   if (opts.visibility === "private" && !opts.password) { toast("Set a password for a private table."); return; }
   $("online-create-btn").disabled = true;

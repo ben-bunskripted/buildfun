@@ -14,9 +14,14 @@ export const handler = async (event, context) => {
   const user = getUser(context);
   if (!user) return json(401, { error: "sign-in required" });
 
-  const { name, visibility, password, maxPlayers } = parseBody(event);
+  const { name, visibility, password, maxPlayers, hideWildLabel } = parseBody(event);
   const vis = visibility === "private" ? "private" : "public";
   const max = Math.min(4, Math.max(2, Number(maxPlayers) || 4));
+  // Match-level options the host picks at setup. Seeded into the games row's
+  // state now (status "lobby", seq 0 — so get-room never sends it yet) and
+  // folded into the real dealt state by start-game, which delivers it to every
+  // seat. Stored as JSONB so adding options later needs no schema change.
+  const gameOptions = { hideWildLabel: !!hideWildLabel };
   if (vis === "private" && !password) return json(400, { error: "private rooms need a password" });
   const passwordHash = vis === "private" ? await hashPassword(String(password)) : null;
 
@@ -51,7 +56,8 @@ export const handler = async (event, context) => {
       VALUES (${code}, ${roomName}, ${user.uid}, ${vis}, ${passwordHash}, 'lobby', ${max})`;
     await sql`INSERT INTO room_seats (room_id, seat_index, uid, display_name)
       VALUES (${code}, 0, ${user.uid}, ${seatName})`;
-    await sql`INSERT INTO games (room_id, seq, current_seat, status) VALUES (${code}, 0, 0, 'lobby')`;
+    await sql`INSERT INTO games (room_id, seq, current_seat, status, state)
+      VALUES (${code}, 0, 0, 'lobby', ${JSON.stringify({ options: gameOptions })})`;
 
     return json(200, {
       roomId: code,
