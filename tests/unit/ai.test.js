@@ -157,6 +157,72 @@ describe("planTurn — hard: swap a benny out instead of padding a set", () => {
   });
 });
 
+describe("planTurn — wildcard discipline when adding to a set", () => {
+  for (const difficulty of ["medium", "hard"]) {
+    it(`${difficulty}: sheds a natural onto a run but never buries a benny`, () => {
+      // Run 5-6-7♠ on the table. We hold a benny (KC), an 8♠ that extends the
+      // run, and a spare 9♥. The greedy "add highest value" rule would dump the
+      // benny (worth 15) onto the run; discipline must add the 8♠ instead and
+      // keep the benny in hand as go-out fuel. No opponent pressure.
+      const s = turnFixture({
+        hand: ["KC", "8S", "9H"],
+        table: [runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 0 })],
+      });
+      const plan = planTurn(s, difficulty);
+      // The benny is never played or added to a set.
+      expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "KC"))).toBe(false);
+      expect(plan.some(a => a.type === "play" && a.arrangement.cards.some(c => c.card.id === "KC"))).toBe(false);
+      // The natural extension still happens.
+      expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "8S"))).toBe(true);
+    });
+  }
+
+  it("still spends a benny to shed when an opponent is about to go out", () => {
+    // Same shape, but the opponent is on a single card: now minimising what we
+    // could be caught holding beats hoarding the wild, so dumping it is allowed.
+    const s = turnFixture({
+      hand: ["KC", "9H", "3D"],
+      table: [runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 0 })],
+    });
+    s.players[1].hand = cards("2C");
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "KC"))).toBe(true);
+  });
+});
+
+describe("planTurn — discard: don't hoard a high card when our own hand is short", () => {
+  it("sheds a high swap-key it can't cash in yet rather than getting caught with it", () => {
+    // Opponent run 8-9-(wild=10)-J♥; we hold 10♥ (which could later swap that
+    // benny out) plus a junk 3♣ — but we haven't opened, so we can't swap this
+    // turn, and we're down to two cards. Holding the 10 just risks being caught
+    // with it; the CPU should shed the high card. (10♥ sits inside the run so it
+    // can't be gifted as an add, isolating the hoard decision.)
+    const s = turnFixture({
+      hand: ["10H", "3C"],
+      table: [runSet("H", 8, [natSlot("8H"), natSlot("9H"), wildSlot("KC", "10", "H"), natSlot("JH")], { id: "run1", ownerIndex: 1 })],
+    });
+    s.players[0].hasOpened = false; // can't actually swap → no reason to cling
+    const plan = planTurn(s, "hard");
+    const disc = plan.find(a => a.type === "discard");
+    expect(disc.cardId).toBe("10H");
+  });
+
+  it("still hoards the swap-key when our hand has room to use it", () => {
+    // Same swap-key (10♥ matches the buried wild), but now a roomy hand: keeping
+    // the 10 to reclaim the benny later is worth more than its raw rank, so the
+    // CPU sheds a low card instead.
+    const s = turnFixture({
+      hand: ["10H", "2C", "3C", "4D", "9S", "5S"],
+      table: [runSet("H", 8, [natSlot("8H"), natSlot("9H"), wildSlot("KC", "10", "H"), natSlot("JH")], { id: "run1", ownerIndex: 1 })],
+    });
+    s.players[0].hasOpened = false;
+    const plan = planTurn(s, "hard");
+    const disc = plan.find(a => a.type === "discard");
+    expect(disc.cardId).not.toBe("10H");
+  });
+});
+
 describe("planTurn — hard: going out beats wildcard recovery", () => {
   it("picks up and adds the discard top to win rather than swapping a benny", () => {
     // We're down to a single card (2D). The discard top (8S) both extends the
