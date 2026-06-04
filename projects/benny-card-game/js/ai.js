@@ -371,11 +371,21 @@ function chooseDiscard(state, difficulty) {
     }
     // Don't drop a card we could swap for an already-played wildcard —
     // holding it lets us return the wild to our hand later, which is much
-    // more valuable than the card's raw rank. Endgame disables the hoard
-    // since holding a 15-point wild is worse than getting caught with it.
+    // more valuable than the card's raw rank. But that reclaim only pays off
+    // if we have room left to use it: as our OWN hand shrinks, clinging to a
+    // high card we can't yet cash in just risks being caught holding it (the
+    // "holds big cards with one or two left" problem). So taper the hoard off
+    // as our hand gets short, and drop it entirely at <=3 cards. (goingOut and
+    // opponent-endgame already disable it: a hold is worse than a clean shed.)
     if (!goingOut && !endgame) {
       const swap = findSwappableWildFor(card, state.table, wildRank);
-      if (swap) badness += difficulty === "hard" ? 25 : 14;
+      if (swap) {
+        const room = me.hand.length;                    // breathing room before we're exposed
+        const full = difficulty === "hard" ? 25 : 14;
+        if (room >= 5) badness += full;
+        else if (room === 4) badness += full * 0.5;
+        // room <= 3: don't hoard — shedding the high card wins.
+      }
     }
     // Small randomness so the CPU isn't perfectly predictable.
     if (difficulty === "hard") badness += (randomInt(7) - 3) * 0.3;
@@ -557,6 +567,20 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
 
     if (me.hasOpened) {
       let adds = enumerateAdditions(me.hand, v.table, wildRank).filter(a => me.hand.length - 1 >= 1);
+      const endgameNow = maxOpponentThreat(v) >= 80;
+      // Wildcard discipline (the big one): a benny in hand is go-out fuel — it
+      // fills any gap and is 15 points if we're caught with it. enumerateAdditions
+      // happily offers wild "adds" and, scoring each at its 15-point value, sorts
+      // them FIRST — so without this guard the CPU keeps burying bennies as set
+      // padding. Never spend a wild on a plain add while the round is live; only
+      // when shedding to go out, or in the endgame where minimising caught value
+      // beats hoarding the wild's flexibility.
+      if (!shed && !endgameNow) {
+        adds = adds.filter(a => {
+          const c = me.hand.find(h => h.id === a.cardId);
+          return c && !isWildcard(c, wildRank);
+        });
+      }
       // Don't burn a natural card padding a meld when that same card could
       // instead swap a wildcard back out of a set — recovering a 15-point
       // wild to reuse beats a plain add. Prefer adds that DON'T have a swap
@@ -564,7 +588,7 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
       // let the swap step (in planAfterDraw) take the benny back. Disabled in
       // the endgame: when an opponent is about to go out, shedding a card
       // (adds shrink the hand; swaps don't) matters more than the wild.
-      if (adds.length && difficulty !== "easy" && !shed && maxOpponentThreat(v) < 80) {
+      if (adds.length && difficulty !== "easy" && !shed && !endgameNow) {
         const nonSwap = adds.filter(a => !findSwappableWildFor(me.hand.find(c => c.id === a.cardId), v.table, wildRank));
         if (nonSwap.length) adds = nonSwap;
         else break;
