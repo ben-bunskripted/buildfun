@@ -27,7 +27,7 @@ const ui = {
   summaries: {},    // per-human achievement tally
   cpuTimer: null,
   busy: false,      // an action animation is in flight
-  setup: { players: 3, difficulty: "normal", eightMode: "invisible", swap: true, fourkind: true, replay: true, seven: true },
+  setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
 };
 
 // ---------------------------------------------------------------- boot
@@ -95,10 +95,13 @@ function wireStart() {
   wireSeg("#seg-players", "n", (n) => { ui.setup.players = +n; renderNames(); });
   wireSeg("#seg-difficulty", "d", (d) => { ui.setup.difficulty = d; });
   wireSeg("#seg-eight", "e", (e) => { ui.setup.eightMode = e; });
+  $("#opt-two").addEventListener("change", (e) => ui.setup.two = e.target.checked);
+  $("#opt-ten").addEventListener("change", (e) => ui.setup.ten = e.target.checked);
+  $("#opt-seven").addEventListener("change", (e) => ui.setup.seven = e.target.checked);
+  $("#opt-jokers").addEventListener("change", (e) => ui.setup.jokers = e.target.checked);
   $("#opt-swap").addEventListener("change", (e) => ui.setup.swap = e.target.checked);
   $("#opt-fourkind").addEventListener("change", (e) => ui.setup.fourkind = e.target.checked);
   $("#opt-replay").addEventListener("change", (e) => ui.setup.replay = e.target.checked);
-  $("#opt-seven").addEventListener("change", (e) => ui.setup.seven = e.target.checked);
 
   $("#start-btn").addEventListener("click", onDeal);
   $("#resume-btn").addEventListener("click", onResume);
@@ -154,10 +157,13 @@ function collectSetup() {
   }
   const options = {
     eightMode: ui.setup.eightMode,
+    twoPower: ui.setup.two,
+    tenPower: ui.setup.ten,
+    sevenPower: ui.setup.seven,
+    jokers: ui.setup.jokers,
     swapPhase: ui.setup.swap,
     fourKindAcrossTurns: ui.setup.fourkind,
     replayOnBurn: ui.setup.replay,
-    sevenPower: ui.setup.seven,
   };
   return { players, options };
 }
@@ -356,6 +362,7 @@ function renderPlay() {
   // turn pill
   const pill = $("#turn-pill");
   if (state.phase === "over") pill.textContent = "Game over";
+  else if (myTurn && summ && summ.underAttack) pill.textContent = "🃏 Joker! Play a 3 or pick up";
   else if (myTurn) pill.textContent = zone === "faceDown" ? "Flip a face-down card" : "Your turn";
   else pill.textContent = `${cur.name} is playing…`;
   pill.classList.toggle("yours", myTurn);
@@ -427,6 +434,12 @@ function renderCenter(myTurn, summ) {
 
   const hint = $("#req-hint");
   if (!myTurn) { hint.textContent = ""; return; }
+  if (summ && summ.underAttack) {
+    hint.textContent = summ.mustPickup
+      ? "Joker played — no 3 to deflect, pick up the pile"
+      : "Joker played — play a 3 to pass it on, or pick up the pile";
+    return;
+  }
   const req = requirement(state.pile, state.options);
   const cc = comparisonCard(state.pile, state.options);
   if (req.kind === "free") hint.textContent = "Play any card";
@@ -437,7 +450,8 @@ function renderCenter(myTurn, summ) {
 function renderYou(viewer, myTurn, zone, summ) {
   // face-down
   const fdHost = $("#you-facedown"); fdHost.replaceChildren();
-  const blindActive = myTurn && zone === "faceDown";
+  // No blind flips while under a joker attack — the pile must be taken.
+  const blindActive = myTurn && zone === "faceDown" && !(summ && summ.underAttack);
   viewer.faceDown.forEach((c, i) => {
     const stack = document.createElement("div");
     stack.className = "mini-stack you-stack";
@@ -517,7 +531,8 @@ function renderActions(viewer, myTurn, zone, summ) {
   playBtn.hidden = !canAct || zone === "faceDown";
 
   if (!canAct) { info.textContent = ""; return; }
-  if (zone === "faceDown") info.textContent = "Tap a face-down card to flip it";
+  if (summ && summ.underAttack && summ.mustPickup) info.textContent = "No 3 — pick up the pile";
+  else if (zone === "faceDown") info.textContent = "Tap a face-down card to flip it";
   else if (ui.selected.length) {
     const r = cardRank(viewer, ui.selected[0]);
     info.textContent = `${ui.selected.length}× ${r}`;
@@ -553,6 +568,8 @@ function trackEvent() {
     const tens = e.cards.filter((c) => c.rank === "10").length;
     const twos = e.cards.filter((c) => c.rank === "2").length;
     s.tens += tens; s.twos += twos;
+    if (e.joker) s.jokers += e.cards.length;
+    if (e.deflect) s.deflects += 1;
     if (e.burned) { s.burns += 1; if (tens === 0) s.fourKinds += 1; }
     if (e.finished && e.wasBlind) s.wonOnBlind = true;
   } else if (e.type === "pickup" || e.type === "blindFail") {
@@ -700,12 +717,13 @@ function renderHowto() {
     <p><b>Goal:</b> get rid of all your cards. The last player still holding cards is the <b>Sh!thead</b>.</p>
     <p><b>Each turn</b> play a card equal to or higher than the top of the pile, then draw back up to 3 (while the deck lasts). Play several at once if they're the same rank. Can't (or won't) play? <b>Pick up the whole pile.</b></p>
     <p><b>Card order:</b> 3 (low) → 4 → 5 → 6 → 7 → 8 → 9 → J → Q → K → A (high).</p>
-    <p><b>Power cards</b></p>
+    <p><b>Power cards</b> (each can be switched on or off in House rules)</p>
     <ul>
       <li><b>2</b> — Reset. Play on anything; the next player can play anything.</li>
       <li><b>10</b> — Burn. Play on anything; the pile is removed and you go again.</li>
       <li><b>7</b> — The next player must play a 7 or lower.</li>
-      <li><b>8</b> — Invisible (see through to the card below) <i>or</i> Skip the next player, depending on house rules.</li>
+      <li><b>8</b> — <b>Reverse</b> the direction of play (with two players it bounces back, so you go again), <i>or</i> Invisible (see through to the card below), <i>or</i> Skip the next player — depending on house rules.</li>
+      <li><b>Joker</b> — the next player must pick up the <i>whole pile</i>… unless they play a <b>3</b>, which passes that fate to the player after them, and so on until someone without a 3 scoops it all.</li>
       <li><b>Four of a kind</b> on the pile burns it — same as a 10.</li>
     </ul>
     <p><b>Endgame:</b> once your hand is empty, play your 3 face-up cards. Then play your 3 face-down cards <b>blind</b> — flip one; if it beats the pile it stays, otherwise you take the pile.</p>`;

@@ -50,15 +50,23 @@
 
         <details class="house-rules">
           <summary>House rules</summary>
+
+          <p class="rules-sub">Power cards</p>
+          <label class="toggle"><input type="checkbox" id="opt-two" checked /> <span><b>2</b> — Reset the pile</span></label>
+          <label class="toggle"><input type="checkbox" id="opt-ten" checked /> <span><b>10</b> — Burn the pile</span></label>
+          <label class="toggle"><input type="checkbox" id="opt-seven" /> <span><b>7</b> — Next play must be 7 or lower</span></label>
+          <label class="toggle"><input type="checkbox" id="opt-jokers" /> <span><b>Jokers</b> — add 2; the next player takes the whole pile unless they play a 3</span></label>
+
           <label class="field"><span>The 8</span>
             <div class="seg" id="seg-eight">
-              <button data-e="invisible" class="on">Invisible</button><button data-e="skip">Skip</button>
+              <button data-e="reverse" class="on">Reverse</button><button data-e="invisible">Invisible</button><button data-e="skip">Skip</button>
             </div>
           </label>
-          <label class="toggle"><input type="checkbox" id="opt-swap" checked /> <span>Swap phase before play</span></label>
-          <label class="toggle"><input type="checkbox" id="opt-fourkind" checked /> <span>4-of-a-kind burns across turns</span></label>
+
+          <p class="rules-sub">Other</p>
+          <label class="toggle"><input type="checkbox" id="opt-fourkind" checked /> <span>4-of-a-kind burns the pile</span></label>
           <label class="toggle"><input type="checkbox" id="opt-replay" checked /> <span>Replay after burning the pile</span></label>
-          <label class="toggle"><input type="checkbox" id="opt-seven" checked /> <span>7 forces the next play ≤ 7</span></label>
+          <label class="toggle"><input type="checkbox" id="opt-swap" checked /> <span>Swap phase before play</span></label>
         </details>
 
         <button class="btn primary big" id="start-btn">Deal</button>

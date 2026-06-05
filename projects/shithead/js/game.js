@@ -9,8 +9,8 @@
 //   hand → face-up (only once hand is empty) → face-down (blind, last resort).
 
 import {
-  RANKS, SUITS, value, defaultOptions, requirement, canPlayRank,
-  burnsPile, skipCount, playableRanks, compareForHand,
+  RANKS, SUITS, JOKER, value, defaultOptions, requirement, canPlayRank,
+  burnsPile, playableRanks, compareForHand, isJoker, isJokerDefence,
 } from "./rules.js";
 import { shuffleInPlace } from "./rng.js";
 
@@ -22,9 +22,13 @@ const SUIT_ORDER = { S: 0, H: 1, D: 2, C: 3 };
 // fires on degenerate weak-CPU stalls and never alters a normal match.
 const STALL_LIMIT = 120;
 
-function buildDeck() {
+function buildDeck(options = {}) {
   const cards = [];
   for (const r of RANKS) for (const s of SUITS) cards.push({ id: `${r}${s}`, rank: r, suit: s });
+  if (options.jokers) {
+    cards.push({ id: `${JOKER}1`, rank: JOKER, suit: "1" });
+    cards.push({ id: `${JOKER}2`, rank: JOKER, suit: "2" });
+  }
   return cards;
 }
 
@@ -36,7 +40,7 @@ export function deserialize(obj) { return obj; }
 
 export function createState({ players, options = {}, shuffle } = {}) {
   const opts = { ...defaultOptions(), ...options };
-  const deck = buildDeck();
+  const deck = buildDeck(opts);
   (shuffle || shuffleInPlace)(deck);
 
   const ps = players.map((p) => ({
@@ -66,6 +70,8 @@ export function createState({ players, options = {}, shuffle } = {}) {
     pile: [],
     burnedCount: 0,
     current: 0,
+    direction: 1,            // +1 clockwise, -1 after an odd number of reversing 8s
+    jokerAttack: false,      // current player must answer a joker (play a 3 or pick up)
     phase: opts.swapPhase ? "swap" : "play",
     started: false,
     turn: 0,
@@ -79,10 +85,10 @@ export function createState({ players, options = {}, shuffle } = {}) {
   return state;
 }
 
-// For starter selection, treat the always-playable powers (2, 10) as high so the
-// opener is the holder of the lowest "real" climbing card — the rules' "lowest 3".
+// For starter selection, treat the powers (2, 10, joker) as high so the opener
+// is the holder of the lowest "real" climbing card — the rules' "lowest 3".
 function starterValue(rank) {
-  return (rank === "2" || rank === "10") ? 50 + value(rank) : value(rank);
+  return (rank === "2" || rank === "10" || rank === JOKER) ? 50 + value(rank) : value(rank);
 }
 
 function beginPlay(state) {
@@ -136,9 +142,10 @@ function activeCount(state) { return state.players.filter((p) => !p.finished).le
 function nextActiveIndex(state, from, steps) {
   const n = state.players.length;
   if (activeCount(state) <= 1) return from;
+  const dir = state.direction === -1 ? -1 : 1;
   let i = from, moved = 0, guard = 0;
   while (moved < steps && guard < n * (steps + 1) + 2) {
-    i = (i + 1) % n;
+    i = (i + dir + n) % n;
     if (!state.players[i].finished) moved++;
     guard++;
   }
@@ -180,12 +187,23 @@ export function currentZone(player) {
 export function legalSummary(state) {
   const p = state.players[state.current];
   const zone = currentZone(p);
-  if (!zone) return { zone: null, ranks: [], mustPickup: false, blind: false };
+  if (!zone) return { zone: null, ranks: [], mustPickup: false, blind: false, underAttack: false };
+
+  // Under a joker attack the only escape is to play a 3 from a visible zone;
+  // otherwise (no 3, or down to blind face-down cards) the pile must be taken.
+  if (state.jokerAttack) {
+    if (zone === "faceDown") {
+      return { zone, ranks: [], mustPickup: true, blind: false, underAttack: true };
+    }
+    const has3 = p[zone].some((c) => isJokerDefence(c.rank));
+    return { zone, ranks: has3 ? ["3"] : [], mustPickup: !has3, blind: false, underAttack: true };
+  }
+
   if (zone === "faceDown") {
-    return { zone, ranks: [], mustPickup: false, blind: true };
+    return { zone, ranks: [], mustPickup: false, blind: true, underAttack: false };
   }
   const ranks = playableRanks(p[zone], state.pile, state.options);
-  return { zone, ranks, mustPickup: ranks.length === 0, blind: false };
+  return { zone, ranks, mustPickup: ranks.length === 0, blind: false, underAttack: false };
 }
 
 function refillHand(state, p) {
@@ -234,6 +252,15 @@ function doPlay(state, { playerId, source, cardIds }) {
   const zone = currentZone(p);
   if (!zone || (source && source !== zone)) return;
 
+  // While under a joker attack the only legal play is a 3 from a visible zone.
+  if (state.jokerAttack) {
+    if (zone === "faceDown") return;                       // must pick up instead
+    const cards = p[zone].filter((c) => cardIds.includes(c.id));
+    if (cards.length === 0 || cards.length !== cardIds.length) return;
+    if (!cards.every((c) => isJokerDefence(c.rank))) return;
+    return deflectJoker(state, p, zone, cards);
+  }
+
   if (zone === "faceDown") return doFaceDown(state, p, cardIds && cardIds[0]);
 
   const cards = p[zone].filter((c) => cardIds.includes(c.id));
@@ -245,6 +272,27 @@ function doPlay(state, { playerId, source, cardIds }) {
   if (!canPlayRank(rank, req, state.options)) return; // illegal — caller pre-checks
 
   commitPlay(state, p, zone, cards);
+}
+
+// Answer a joker with one or more 3s: they land on the pile and the obligation
+// to take it passes, unchanged, to the next player. No burns resolve mid-chain.
+function deflectJoker(state, p, zone, cards) {
+  const ids = new Set(cards.map((c) => c.id));
+  p[zone] = p[zone].filter((c) => !ids.has(c.id));
+  state.pile.push(...cards);
+
+  const drew = zone === "hand" ? refillHand(state, p) : [];
+  const finished = maybeFinish(state, p);
+
+  state.lastEvent = {
+    type: "play", playerId: p.id, zone, cards, burned: false, skip: 0,
+    drew, finished, wasBlind: false, rank: "3", deflect: true,
+  };
+
+  if (checkGameOver(state)) return;
+  // jokerAttack stays true — the next player now faces the same pile.
+  state.current = nextActiveIndex(state, state.current, 1);
+  state.turn++;
 }
 
 // Blind face-down flip: reveal one card; it stays if legal, otherwise the player
@@ -289,13 +337,15 @@ function commitPlay(state, p, zone, cards, wasBlind = false) {
   // Lay on the pile.
   state.pile.push(...cards);
 
-  const burned = burnsPile(cards, state.pile, state.options);
-  const skip = burned ? 0 : skipCount(cards, state.options);
+  // A joker never burns — it puts the next player under attack instead.
+  const playedJoker = isJoker(cards[0].rank);
+  const burned = !playedJoker && burnsPile(cards, state.pile, state.options);
 
   if (burned) {
     state.burnedCount += state.pile.length;
     state.pile = [];
   }
+  if (playedJoker) state.jokerAttack = true;
 
   const drew = zone === "hand" ? refillHand(state, p) : [];
   const finished = maybeFinish(state, p);
@@ -306,23 +356,43 @@ function commitPlay(state, p, zone, cards, wasBlind = false) {
     zone,
     cards,
     burned,
-    skip,
+    skip: 0,
     drew,
     finished,
     wasBlind,
     rank: cards[0].rank,
+    joker: playedJoker,
   };
 
   if (checkGameOver(state)) return;
 
-  const replay = burned && state.options.replayOnBurn && !finished;
-  if (replay) {
-    // Same player goes again on the now-empty pile.
+  // Burning grants another go on the now-empty pile (jokers never burn).
+  if (burned && state.options.replayOnBurn && !finished) {
     state.turn++;
     return;
   }
-  state.current = nextActiveIndex(state, state.current, 1 + skip);
+
+  const steps = advanceSteps(state, cards, burned);
+  state.lastEvent.skip = Math.max(0, steps - 1);
+  state.current = nextActiveIndex(state, state.current, steps);
   state.turn++;
+}
+
+// Active seats to advance after a normal (non-burn) play. An 8 either skips the
+// next player (skip mode) or flips the table direction (reverse mode); with only
+// two players left a reversing 8 simply bounces back, so it acts like a skip.
+function advanceSteps(state, cards, burned) {
+  if (burned) return 1;
+  const eights = cards.filter((c) => c.rank === "8").length;
+  if (eights === 0) return 1;
+  const mode = state.options.eightMode;
+  if (mode === "skip") return 1 + eights;
+  if (mode === "reverse") {
+    if (activeCount(state) <= 2) return 1 + eights;   // bounces straight back
+    if (eights % 2 === 1) state.direction *= -1;       // an odd run flips the table
+    return 1;
+  }
+  return 1; // invisible — no positional effect
 }
 
 function doPickup(state, { playerId }) {
@@ -332,10 +402,12 @@ function doPickup(state, { playerId }) {
   if (state.pile.length === 0) return;
 
   const count = state.pile.length;
+  const fromJoker = state.jokerAttack;
   p.hand.push(...state.pile);
   p.hand.sort(compareForHand);
   state.pile = [];
-  state.lastEvent = { type: "pickup", playerId: p.id, count };
+  state.jokerAttack = false;               // the attack ends when the pile is taken
+  state.lastEvent = { type: "pickup", playerId: p.id, count, fromJoker };
   state.current = nextActiveIndex(state, state.current, 1);
   state.turn++;
   checkGameOver(state);

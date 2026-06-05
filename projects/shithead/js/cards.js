@@ -2,7 +2,7 @@
 // Two render modes: "modern" uses the full-card SVG assets in assets/cards/;
 // "classic" builds the card from corner indices + a pip grid + J/Q/K portraits.
 
-import { RANKS, SUITS, SUIT_GLYPH } from "./rules.js";
+import { RANKS, SUITS, SUIT_GLYPH, JOKER } from "./rules.js";
 
 export { RANKS, SUITS, SUIT_GLYPH };
 
@@ -25,6 +25,7 @@ export function getCardStyle() { return CARD_STYLE; }
 
 // ---------- Modern renderer (SVG assets) ----------
 function assetName(rank, suit) {
+  if (rank === JOKER) return suit === "1" ? "1J.svg" : "2J.svg";
   const r = rank === "10" ? "T" : rank;
   return `${r}${suit}.svg`;
 }
@@ -104,7 +105,14 @@ export function renderCard(card, opts = {}) {
   el.dataset.cardId = card.id;
   el.dataset.rank = card.rank;
 
-  if (CARD_STYLE === "classic") {
+  if (CARD_STYLE === "classic" && card.rank === JOKER) {
+    el.classList.remove(suitColorClass(card.suit));
+    el.classList.add("joker");
+    el.innerHTML = `
+      <div class="corner top-left"><span class="rank">JKR</span><span class="suit">★</span></div>
+      <div class="face joker-face"><span class="joker-star">★</span><span class="joker-word">JOKER</span></div>
+      <div class="corner bottom-right"><span class="rank">JKR</span><span class="suit">★</span></div>`;
+  } else if (CARD_STYLE === "classic") {
     el.innerHTML = `
       <div class="corner top-left">
         <span class="rank">${card.rank}</span>

@@ -51,6 +51,24 @@ describe("CPU self-play", () => {
     }
   }
 
+  it("terminates cleanly with jokers + reversing 8s in play", () => {
+    for (const n of [2, 3, 4]) {
+      for (let game = 0; game < 6; game++) {
+        const players = Array.from({ length: n }, (_, k) => ({
+          id: `p${k}`, name: `P${k}`, isCPU: true, difficulty: k % 2 ? "hard" : "normal",
+        }));
+        const s = createState({ players, options: { eightMode: "reverse", jokers: true } });
+        autoSwapAndStart(s);
+        const turns = playOut(s);
+        expect(s.phase).toBe("over");
+        expect(turns).toBeLessThan(2000);
+        const withCards = s.players.filter((p) => p.hand.length || p.faceUp.length || p.faceDown.length);
+        expect(withCards.length).toBe(1);
+        expect(s.shitheadId).toBe(withCards[0].id);
+      }
+    }
+  });
+
   it("makes real progress every turn — the turn counter never stalls mid-game", () => {
     const players = [
       { id: "a", name: "A", isCPU: true, difficulty: "hard" },

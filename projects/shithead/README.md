@@ -28,9 +28,20 @@ No install, no bundler. Modern-browser features are used unconditionally
 ## Rules implemented
 
 - Ranking 3 (low) → A (high). Lowest 3 starts (4 if nobody holds a 3).
-- **Power cards:** `2` reset · `10` burn (+ replay) · `7` forces the next play
-  ≤ 7 (else pick up) · `8` invisible **or** skip (house-rule toggle) ·
-  four-of-a-kind burns the pile (including completing it across turns).
+- **Power cards** (each individually switchable in House rules — the default
+  loadout is `2`, `10` and a reversing `8`):
+  - `2` — reset the pile.
+  - `10` — burn the pile (+ replay).
+  - `7` — forces the next play ≤ 7 (else pick up). *Off by default.*
+  - `8` — **reverse** the direction of play (default; with two players it
+    bounces back so you go again) · **invisible** (see through to the card
+    below) · **skip** the next player.
+  - **Jokers** — adds 2 jokers (54-card deck). Playing one forces the next
+    player to take the **whole pile**, unless they answer with a `3`, which
+    passes that obligation down the line until someone without a `3` scoops it
+    all. A `3` has no power of its own — it is purely a joker defence.
+    *Off by default.*
+  - Four-of-a-kind burns the pile (including completing it across turns).
 - Pre-game swap phase (hand ↔ face-up), optional.
 - Endgame: hand → face-up → face-down blind flips.
 - A stalemate safeguard force-burns the pile if play stops making progress for a
@@ -60,7 +71,7 @@ shithead/
 └── assets/
     ├── logo.png            # start-screen hero + homepage card
     ├── favicon.png         # favicon / apple-touch-icon / PWA icon source
-    └── cards/              # 52 bridge-size SVG cards (shared with Benny)
+    └── cards/              # 52 bridge-size SVG cards + 2 jokers (shared with Benny)
 ```
 
 ## Tests

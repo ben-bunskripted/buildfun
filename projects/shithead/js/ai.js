@@ -5,11 +5,13 @@
 //   hard   — normal + completes 4-of-a-kinds, burns fat/dangerous piles, dumps
 //            duplicates, and is stingier with its power cards.
 
-import { value, requirement, canPlayRank } from "./rules.js";
+import { value, requirement, canPlayRank, isJokerDefence } from "./rules.js";
 import { currentZone } from "./game.js";
 import { pickRandom, randomInt } from "./rng.js";
 
-const POWER = new Set(["2", "10"]);
+// Ranks the CPU keeps in reserve rather than leading with: the always-playable
+// powers (2, 10) plus the joker, which it would rather fire when truly stuck.
+const POWER = new Set(["2", "10", "JK"]);
 
 function countsByRank(cards) {
   const m = new Map();
@@ -21,6 +23,16 @@ export function planTurn(state) {
   const p = state.players[state.current];
   const zone = currentZone(p);
   if (!zone) return { type: "pickup", playerId: p.id }; // shouldn't happen
+
+  // Under a joker attack: answer with a 3 if one is to hand, otherwise eat the
+  // pile. Blind face-down cards can't deflect, so those players must pick up.
+  if (state.jokerAttack) {
+    if (zone !== "faceDown") {
+      const three = p[zone].find((c) => isJokerDefence(c.rank));
+      if (three) return playAction(p, zone, [three]);
+    }
+    return { type: "pickup", playerId: p.id };
+  }
 
   // Blind face-down: nothing to reason about — flip a random one.
   if (zone === "faceDown") {
@@ -78,9 +90,15 @@ export function planTurn(state) {
     return playAction(p, zone, byRank.get(r));
   }
 
-  // Only powers are legal — use the cheaper 2 before torching with a 10.
-  const useRank = byRank.has("2") ? "2" : "10";
-  return playAction(p, zone, byRank.get(useRank).slice(0, 1));
+  // Only powers are legal. On a fat pile, fire a joker to dump it on the next
+  // player (or torch it with a 10); on a thin pile, reset cheaply with a 2 and
+  // hoard the joker for a juicier moment.
+  const fat = state.pile.length >= 4;
+  const order = fat ? ["JK", "10", "2"] : ["2", "10", "JK"];
+  for (const r of order) {
+    if (byRank.has(r)) return playAction(p, zone, byRank.get(r).slice(0, 1));
+  }
+  return playAction(p, zone, byRank.get(ranks[0]).slice(0, 1));
 }
 
 function countTopSame(pile) {
