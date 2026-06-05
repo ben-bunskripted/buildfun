@@ -636,6 +636,16 @@ function planAfterDraw(state, actions, difficulty) {
       const v = virtualState(state, actions);
       const me = v.players[v.currentPlayerIndex];
       if (!me.hasOpened) break;
+      // Reclaiming a benny moves a 15-point card OFF the table (0 pts to us)
+      // and INTO our hand (15 pts if we're caught), trading away a low natural
+      // for it. It only pays off if we keep the benny long enough to cash it as
+      // go-out fuel. With a short hand — or an opponent about to go out — we
+      // can't, and we just get marooned holding the 15 (the "swapped my last
+      // card for a benny and got caught" trap). So only reclaim with genuine
+      // breathing room and no imminent out; this mirrors the discard-hoard
+      // taper, which only hoards a swap-key at full strength with >=5 cards.
+      if (me.hand.length < 5) break;
+      if (maxOpponentThreat(v) >= 80) break;
       const swaps = enumerateSwaps(me.hand, v.table, wildRank);
       if (!swaps.length) break;
       const s = swaps[0];
