@@ -1,0 +1,19 @@
+{
+  "id": "/projects/shithead/",
+  "name": "Sh!thead — Card Game",
+  "short_name": "Sh!thead",
+  "description": "The classic shedding card game. Dump your cards, wield the power cards, and don't be the last one holding.",
+  "start_url": ".",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "orientation": "portrait",
+  "background_color": "#120c33",
+  "theme_color": "#15103a",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

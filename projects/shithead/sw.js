@@ -1,0 +1,71 @@
+// Bump this on any deploy that changes shell files.
+const CACHE = "shithead-v1";
+
+const CARD_NAMES = [
+  "2C","2D","2H","2S","3C","3D","3H","3S","4C","4D","4H","4S",
+  "5C","5D","5H","5S","6C","6D","6H","6S","7C","7D","7H","7S",
+  "8C","8D","8H","8S","9C","9D","9H","9S","TC","TD","TH","TS",
+  "JC","JD","JH","JS","QC","QD","QH","QS","KC","KD","KH","KS",
+  "AC","AD","AH","AS",
+];
+
+const SHELL = [
+  "./",
+  "./index.html",
+  "./manifest.webmanifest",
+  "./css/styles.css",
+  "./js/main.js",
+  "./js/cards.js",
+  "./js/game.js",
+  "./js/rules.js",
+  "./js/ai.js",
+  "./js/rng.js",
+  "./js/storage.js",
+  "./js/profiles.js",
+  "./js/achievements.js",
+  "./js/sw-register.js",
+  "./assets/favicon.png",
+  "./assets/logo.png",
+  "./assets/icon-192.png",
+  "./assets/icon-512.png",
+  ...CARD_NAMES.map((n) => `./assets/cards/${n}.svg`),
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(SHELL);
+  })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/.netlify/") || url.pathname.startsWith("/api/")) return;
+  event.respondWith((async () => {
+    const cached = await caches.match(req);
+    if (cached) return cached;
+    try {
+      const fresh = await fetch(req);
+      if (fresh && fresh.ok) { const cache = await caches.open(CACHE); cache.put(req, fresh.clone()); }
+      return fresh;
+    } catch (_err) {
+      if (req.mode === "navigate") return caches.match("./index.html");
+      return Response.error();
+    }
+  })());
+});
