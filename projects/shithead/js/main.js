@@ -2,6 +2,7 @@
 // the CPU turn driver, and game-over → stats/achievements.
 
 import { renderCard, renderCardBack, setCardStyle } from "./cards.js";
+import { makeHandReorderable } from "./dragdrop.js";
 import {
   createState, applyAction, currentZone, legalSummary, serialize,
 } from "./game.js";
@@ -25,6 +26,8 @@ const ui = {
   humans: [],       // ids of all human-controlled players
   selected: [],     // selected card ids in hand/face-up
   summaries: {},    // per-human achievement tally
+  handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
+  pendingHandRender: false, // a hand rebuild deferred because a drag is live
   cpuTimer: null,
   busy: false,      // an action animation is in flight
   setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
@@ -198,6 +201,7 @@ function startNewGame() {
   state = createState({ players, options });
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
+  ui.handOrders = {};
   ui.summaries = {};
   for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
@@ -290,6 +294,7 @@ function wirePlay() {
   $("#menu-settings").addEventListener("click", () => { closeModals(); openModal("modal-settings"); });
   $("#menu-restart").addEventListener("click", () => { closeModals(); showConfirm("Restart game?", "Deal a fresh game with the same players?", () => startNewGame()); });
   $("#menu-quit").addEventListener("click", () => { closeModals(); exitToStart(); });
+  setupHandDrag();
 }
 
 function enterPlay() {
@@ -395,20 +400,27 @@ function renderPlay() {
   renderActions(viewer, myTurn, zone, summ);
 }
 
+// Seat the opponents around the central pile: one above, or to the left and
+// right, or all three (left / above / right) depending on how many there are.
+const SEATS = { 1: ["top"], 2: ["left", "right"], 3: ["left", "top", "right"] };
+
 function renderOpponents(viewer) {
   const host = $("#opponents");
   host.replaceChildren();
   const others = state.players.filter((p) => p.id !== viewer.id);
-  for (const p of others) {
+  const seats = SEATS[others.length] || others.map(() => "top");
+  others.forEach((p, idx) => {
     const el = document.createElement("div");
-    el.className = "opp";
+    el.className = "opp seat-" + (seats[idx] || "top");
     if (state.players[state.current].id === p.id && state.phase === "play") el.classList.add("active");
     if (p.finished) el.classList.add("finished");
 
     const head = document.createElement("div");
     head.className = "opp-head";
     head.innerHTML = `<span class="opp-name">${escapeHtml(p.name)}</span>` +
-      (p.finished ? `<span class="badge done">#${p.place}</span>` : `<span class="opp-count">✋ ${p.hand.length}</span>`);
+      (p.finished
+        ? `<span class="badge done">#${p.place}</span>`
+        : `<span class="opp-count">✋ ${p.hand.length}</span>`);
     el.appendChild(head);
 
     const table = document.createElement("div");
@@ -427,7 +439,7 @@ function renderOpponents(viewer) {
     }
     el.appendChild(table);
     host.appendChild(el);
-  }
+  });
 }
 
 function renderCenter(myTurn, summ) {
@@ -498,9 +510,15 @@ function renderYou(viewer, myTurn, zone, summ) {
     });
   }
 
-  // hand
-  const hHost = $("#you-hand"); hHost.replaceChildren();
-  viewer.hand.forEach((c) => {
+  // hand — skip the rebuild while a drag is live (the lifted node lives in
+  // <body>); onDragEnd flushes the deferred render once the drag tears down.
+  const hHost = $("#you-hand");
+  if (document.body.classList.contains("hand-dragging")) {
+    ui.pendingHandRender = true;
+    return;
+  }
+  hHost.replaceChildren();
+  orderedHand(viewer).forEach((c) => {
     const el = makeSelectableCard(c, "hand", myTurn && zone === "hand", summ);
     el.classList.add("in-hand");
     if (myTurn && zone === "hand" && !summ.ranks.includes(c.rank)) el.classList.add("dim");
@@ -517,6 +535,18 @@ function makeSelectableCard(c, zoneName, active, summ) {
     if (ui.selected.includes(c.id)) el.classList.add("selected");
   }
   return el;
+}
+
+// The viewer's hand in the order they arranged it (via drag-reorder). Cards
+// drawn or picked up are appended in engine order; removed cards drop out.
+function orderedHand(viewer) {
+  const byCardId = new Map(viewer.hand.map((c) => [c.id, c]));
+  const prev = ui.handOrders[viewer.id] || [];
+  const order = prev.filter((id) => byCardId.has(id));
+  const have = new Set(order);
+  for (const c of viewer.hand) if (!have.has(c.id)) order.push(c.id);
+  ui.handOrders[viewer.id] = order;
+  return order.map((id) => byCardId.get(id));
 }
 
 function bindSelect(el, id, zoneName, summ) {
@@ -620,6 +650,62 @@ function layoutHand(host) {
   let overlap = (available - cardW) / (n - 1) - cardW;
   if (cardW + overlap < minVisible) overlap = minVisible - cardW;
   host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
+}
+
+// ---------------------------------------------------------------- hand drag/drop
+// Reorder the hand by dragging, or drag a card onto the discard pile to play it.
+// Reuses the same pointer-event module as Benny (reparent-to-body + placeholder
+// + deferred render) so the drag survives mid-render rebuilds without ghosting.
+let handDragWired = false;
+function setupHandDrag() {
+  if (handDragWired) return;
+  handDragWired = true;
+  makeHandReorderable(
+    $("#you-hand"),
+    (from, to) => {
+      const order = ui.handOrders[ui.viewerId];
+      if (!order || from < 0 || to < 0 || from >= order.length) { renderPlay(); return; }
+      const [moved] = order.splice(from, 1);
+      order.splice(Math.max(0, Math.min(order.length, to)), 0, moved);
+      renderPlay();
+    },
+    {
+      resolveDropTarget: (x, y) => {
+        const dz = $("#discard-zone");
+        if (!dz) return null;
+        const r = dz.getBoundingClientRect();
+        const pad = 28;
+        if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) {
+          return { el: dz, kind: "discard" };
+        }
+        return null;
+      },
+      onDropOnTarget: (target, cardEl) => { if (target.kind === "discard") dropPlay(cardEl.dataset.cardId); },
+      onPlaceholderMove: () => layoutHand($("#you-hand")),
+      onDragEnd: () => { if (ui.pendingHandRender) { ui.pendingHandRender = false; renderPlay(); } },
+    },
+  );
+}
+
+// A card was dragged onto the discard pile — play it (or its matching set).
+function dropPlay(id) {
+  if (!state || state.phase !== "play") { renderPlay(); return; }
+  const cur = state.players[state.current];
+  const viewer = byId(ui.viewerId);
+  if (!cur || !viewer || cur.id !== viewer.id || cur.isCPU || currentZone(cur) !== "hand") { renderPlay(); return; }
+  const card = viewer.hand.find((c) => c.id === id);
+  const summ = legalSummary(state);
+  if (!card || !summ.ranks.includes(card.rank)) { toast("You can't play that on the pile."); renderPlay(); return; }
+  let cardIds;
+  if (ui.selected.length && ui.selected.includes(id) && cardRank(viewer, ui.selected[0]) === card.rank) {
+    cardIds = ui.selected.slice();                                  // play the chosen set
+  } else if (prefs.selectMatching) {
+    cardIds = viewer.hand.filter((c) => c.rank === card.rank).map((c) => c.id); // grab matching number
+  } else {
+    cardIds = [id];
+  }
+  ui.selected = [];
+  doAction({ type: "play", playerId: cur.id, source: "hand", cardIds });
 }
 
 // ---------------------------------------------------------------- summary tracking
@@ -746,6 +832,7 @@ function onResume() {
   ui.summaries = snap.ui.summaries || {};
   for (const id of ui.humans) if (!ui.summaries[id]) ui.summaries[id] = { ...emptySummary(), total: state.players.length };
   ui.selected = [];
+  ui.handOrders = {};
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
@@ -798,7 +885,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v5";
+const APP_BUILD = "v6";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");

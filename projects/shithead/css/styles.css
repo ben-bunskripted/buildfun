@@ -174,37 +174,48 @@ body {
 .card-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 .card-row.tight { gap: 4px; }
 
-/* ---------------- opponents ---------------- */
-.opponents { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 6px 10px; }
-.opp { background: var(--panel); border-radius: 14px; padding: 8px 10px; min-width: 96px; transition: box-shadow .2s, transform .2s; }
-.opp.active { box-shadow: 0 0 0 2.5px var(--gold); transform: translateY(-3px); }
+/* ---------------- opponents (seated around the pile) ---------------- */
+/* #opponents is display:contents so its .opp children position themselves
+   absolutely against .center-table — above (seat-top) and to the left/right
+   (seat-left / seat-right) of the central deck + discard. */
+#opponents { display: contents; }
+.opp { position: absolute; z-index: 3; background: var(--panel); border-radius: 14px; padding: 7px 9px; display: flex; flex-direction: column; align-items: center; gap: 5px; box-shadow: var(--shadow); transition: box-shadow .2s, transform .2s; }
+.opp.active { box-shadow: 0 0 0 2.5px var(--gold); }
 .opp.finished { opacity: .55; }
-.opp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: .85rem; }
+.opp.seat-top   { top: 2px;  left: 50%; transform: translateX(-50%); }
+.opp.seat-left  { left: 2px;  top: 44%; transform: translateY(-50%); }
+.opp.seat-right { right: 2px; top: 44%; transform: translateY(-50%); }
+.opp.active.seat-top   { transform: translateX(-50%) translateY(-2px); }
+.opp.active.seat-left  { transform: translateY(-50%) scale(1.04); }
+.opp.active.seat-right { transform: translateY(-50%) scale(1.04); }
+.opp-head { display: flex; align-items: center; gap: 7px; font-size: .82rem; }
 .opp-name { font-weight: 700; }
-.opp-count { color: var(--ink-dim); }
-.badge.done { background: var(--good); color: #06321f; border-radius: 999px; padding: 1px 8px; font-weight: 800; }
-.opp-table { display: flex; gap: 3px; }
-.mini-stack { position: relative; width: calc(var(--card-w) * .5); height: calc(var(--card-h) * .5); }
-.card.mini { --card-w: calc(56px * .5); position: absolute; inset: 0; width: 100%; height: 100%; }
-.opp .card.mini, .opp .mini-stack { --card-w: 46px; }
-.card.on-top { position: absolute; left: 0; top: 0; }
+.opp-count { color: var(--ink-dim); font-weight: 650; }
+.badge.done { background: var(--good); color: #06321f; border-radius: 999px; padding: 1px 8px; font-weight: 800; font-size: .78rem; }
+.opp-table { display: flex; gap: 3px; justify-content: center; }
+.opp .mini-stack { width: 33px; height: 51px; }
+.opp .opp-table > .card.mini { position: relative; width: 33px; height: 51px; }
+
+/* shared stack internals (used by both the opponents and your own table) */
+.mini-stack { position: relative; }
 .mini-stack .card { position: absolute; inset: 0; width: 100%; height: 100%; }
+.card.on-top { position: absolute; left: 0; top: 0; }
 /* Lift the face-up card so the face-down card beneath peeks out the bottom,
    making it obvious there's a hidden card underneath each table slot. */
 .you-table .you-stack .card.on-top { transform: translateY(-14%); }
-.opp-table .mini-stack .card.on-top { transform: translateY(-17%); }
+.opp-table .mini-stack .card.on-top { transform: translateY(-16%); }
 
 /* ---------------- center table ---------------- */
-.center-table { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 6px; }
-.pile-zone { display: flex; align-items: center; gap: 18px; }
+.center-table { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 6px; min-height: 300px; }
+.pile-zone { display: flex; align-items: center; gap: 16px; }
 .deck-stack { position: relative; }
 .deck-stack .count, .pile-count, .burned-zone .count { position: absolute; bottom: -6px; right: -6px; background: var(--bg-3); color: var(--ink); border-radius: 999px; padding: 2px 7px; font-size: .8rem; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .deck-stack.empty { opacity: .35; }
 .discard-zone { position: relative; width: var(--card-w); height: var(--card-h); display: flex; align-items: center; justify-content: center; }
 .discard-zone .discard-card { position: absolute; left: calc(var(--i, 0) * 6px); top: calc(var(--i, 0) * -2px); }
 .discard-empty { width: var(--card-w); height: var(--card-h); border: 2px dashed var(--panel-2); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); font-weight: 700; }
-.burned-zone { display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; font-size: 1.6rem; }
-.burned-zone .count { position: static; }
+.burned-zone { position: absolute; right: 8px; bottom: 10px; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 1.2rem; opacity: .85; z-index: 2; }
+.burned-zone .count { position: static; font-size: .78rem; }
 .req-hint { color: var(--gold); font-weight: 700; min-height: 1.2em; text-align: center; }
 
 /* ---------------- you area ---------------- */
@@ -221,6 +232,19 @@ body {
 .card-row.hand > .card.selected { z-index: 10; }
 .card-row.hand.fanned { padding-top: 16px; }
 .card-row.hand.fanned > .card { transform-origin: 50% 240%; }
+
+/* ---------------- hand drag & drop ---------------- */
+/* Claim the touch gesture so the long-press → drag isn't pre-empted by scroll. */
+.card.in-hand { touch-action: none; }
+.card.dragging { z-index: 200; box-shadow: 0 14px 30px rgba(0,0,0,.55); transform-origin: 50% 50%; transform: translateY(-10px) scale(1.04); --card-rot: 0deg; opacity: .6; }
+.card.drag-placeholder { opacity: 0; pointer-events: none; }
+/* While dragging, kill native selection/callout document-wide (Android Chrome
+   otherwise starts a text-selection gesture that cancels the drag). */
+body.hand-dragging, body.hand-dragging * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+body.hand-dragging input, body.hand-dragging textarea { -webkit-user-select: text; user-select: text; }
+/* The discard pile lights up while a card hovers over it. */
+.discard-zone.is-drop-hover { box-shadow: 0 0 0 3px var(--gold), 0 0 18px rgba(255,210,63,.5); border-radius: var(--radius); }
+.discard-zone.is-drop-hover .discard-empty { border-color: var(--gold); color: var(--gold); }
 
 /* ---------------- match-select toggle ---------------- */
 .match-row { display: flex; justify-content: center; padding: 2px 12px 0; }

@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "shithead-v5";
+const CACHE = "shithead-v6";
 
 const CARD_NAMES = [
   "2C","2D","2H","2S","3C","3D","3H","3S","4C","4D","4H","4S",
@@ -19,6 +19,7 @@ const SHELL = [
   "./js/game.js",
   "./js/rules.js",
   "./js/ai.js",
+  "./js/dragdrop.js",
   "./js/rng.js",
   "./js/storage.js",
   "./js/profiles.js",

@@ -127,9 +127,8 @@
     <button class="icon-btn" id="play-exit-btn" aria-label="Save &amp; exit">⇱</button>
   </div>
 
-  <div class="opponents" id="opponents"></div>
-
-  <div class="center-table">
+  <div class="center-table" id="center-table">
+    <div class="opponents" id="opponents"></div>
     <div class="pile-zone">
       <div class="deck-stack" id="deck-stack" title="Draw pile">
         <div class="card back"></div>
@@ -138,9 +137,9 @@
       <div class="discard-zone" id="discard-zone" title="Discard pile">
         <div class="discard-empty" id="discard-empty">Pile</div>
       </div>
-      <div class="burned-zone" id="burned-zone" title="Burned">
-        <span>🔥</span><span class="count" id="burned-count">0</span>
-      </div>
+    </div>
+    <div class="burned-zone" id="burned-zone" title="Burned">
+      <span>🔥</span><span class="count" id="burned-count">0</span>
     </div>
     <div class="req-hint" id="req-hint"></div>
   </div>
