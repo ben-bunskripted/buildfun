@@ -48,10 +48,12 @@ function applyPrefs() {
   setCardStyle(prefs.cardStyle || "modern");
   document.documentElement.dataset.cardSize = prefs.cardSize || "m";
   if (prefs.animate === undefined) prefs.animate = true;
+  if (prefs.selectMatching === undefined) prefs.selectMatching = true;
   // reflect into settings controls
   segSelect("#seg-cardstyle", "cs", prefs.cardStyle || "modern");
   segSelect("#seg-cardsize", "sz", prefs.cardSize || "m");
   const anim = $("#opt-animate"); if (anim) anim.checked = prefs.animate !== false;
+  const match = $("#match-toggle-input"); if (match) match.checked = prefs.selectMatching !== false;
 }
 
 function savePrefs() { storage.savePrefs(prefs); }
@@ -262,6 +264,11 @@ function pickSwap(zone, id) {
 function wirePlay() {
   $("#play-btn").addEventListener("click", onPlaySelected);
   $("#pickup-btn").addEventListener("click", onPickup);
+  $("#match-toggle-input").addEventListener("change", (e) => {
+    prefs.selectMatching = e.target.checked; savePrefs();
+    ui.selected = [];
+    if (state) renderPlay();
+  });
   $("#play-menu-btn").addEventListener("click", () => openModal("modal-menu"));
   $("#play-exit-btn").addEventListener("click", exitToStart);
   $("#menu-howto").addEventListener("click", () => { closeModals(); openModal("modal-howto"); });
@@ -506,10 +513,20 @@ function toggleSelect(id, zoneName, summ) {
   const card = [...viewer.hand, ...viewer.faceUp].find((c) => c.id === id);
   if (!card) return;
   if (summ && !summ.ranks.includes(card.rank)) { toast("You can't play that on the pile."); return; }
-  if (ui.selected.includes(id)) {
+  const selRank = ui.selected.length ? cardRank(viewer, ui.selected[0]) : null;
+
+  if (prefs.selectMatching) {
+    // Tap grabs (or releases) every same-number card in this zone — suit is
+    // irrelevant, only the number matters for laying a set together.
+    if (selRank === card.rank) {
+      ui.selected = [];
+    } else {
+      const zoneCards = viewer[zoneName] || [];
+      ui.selected = zoneCards.filter((c) => c.rank === card.rank).map((c) => c.id);
+    }
+  } else if (ui.selected.includes(id)) {
     ui.selected = ui.selected.filter((x) => x !== id);
   } else {
-    const selRank = ui.selected.length ? cardRank(viewer, ui.selected[0]) : null;
     if (selRank && selRank !== card.rank) ui.selected = [id]; // switch to new rank
     else ui.selected.push(id);
   }
@@ -529,6 +546,8 @@ function renderActions(viewer, myTurn, zone, summ) {
   pickBtn.disabled = !(canAct && zone !== "faceDown" && state.pile.length > 0);
   pickBtn.hidden = !canAct;
   playBtn.hidden = !canAct || zone === "faceDown";
+  const matchRow = $("#match-row");
+  if (matchRow) matchRow.hidden = !(canAct && zone !== "faceDown");
 
   if (!canAct) { info.textContent = ""; return; }
   if (summ && summ.underAttack && summ.mustPickup) info.textContent = "No 3 — pick up the pile";

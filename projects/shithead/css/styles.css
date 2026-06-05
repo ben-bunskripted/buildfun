@@ -1,20 +1,22 @@
-/* Sh!thead — bright/rainbow theme. Single stylesheet. */
+/* Sh!thead — purple theme: deep violet base + violet/gold accents (same
+   navy-with-accents approach as Benny). Single stylesheet. */
 
 :root {
-  --bg-1: #1b1248;
-  --bg-2: #2a1a6b;
-  --bg-3: #120c33;
-  --felt: radial-gradient(ellipse at 50% 0%, #3a2585 0%, #1d1450 45%, #100a2c 100%);
+  --bg-1: #1b1145;
+  --bg-2: #271a63;
+  --bg-3: #130c30;
+  --felt: radial-gradient(ellipse at 50% 0%, #34227a 0%, #1c1450 45%, #0f0a29 100%);
   --panel: rgba(255, 255, 255, 0.07);
   --panel-2: rgba(255, 255, 255, 0.12);
   --ink: #f4f1ff;
   --ink-dim: #b9b2da;
+  --accent: #8b5cf6;
+  --accent-deep: #6233c9;
+  --accent-soft: rgba(139, 92, 246, 0.24);
   --gold: #ffd23f;
   --gold-deep: #f5a623;
   --danger: #ff5d6c;
   --good: #46d39a;
-  --rainbow: linear-gradient(90deg, #ff4d6d, #ff9e3d, #ffd23f, #46d39a, #4aa8ff, #9b5cff);
-  --rainbow-soft: linear-gradient(90deg, #ff8aa0, #ffc78a, #ffe79a, #9fe9cd, #a7d2ff, #c9a8ff);
   --card-w: 72px;
   --card-h: calc(var(--card-w) * 1.553);
   --radius: 16px;
@@ -51,7 +53,8 @@ body {
 .btn:hover { filter: brightness(1.12); }
 .btn:active { transform: scale(0.96); }
 .btn:disabled { opacity: 0.4; cursor: default; }
-.btn.primary { background: var(--rainbow); color: #1a0f3a; box-shadow: 0 6px 18px rgba(155, 92, 255, 0.4); }
+.btn.primary { background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(139, 92, 246, 0.45); }
+.btn.primary:hover { background: var(--accent-deep); filter: none; }
 .btn.big { padding: 15px 26px; font-size: 1.08rem; }
 .btn.small { padding: 8px 14px; font-size: .9rem; }
 .btn.ghost { background: transparent; box-shadow: inset 0 0 0 1.5px var(--panel-2); }
@@ -67,14 +70,14 @@ body {
 
 .mode-tabs { display: flex; gap: 6px; background: var(--panel); padding: 6px; border-radius: 999px; width: 100%; }
 .mode-tab { flex: 1; border: 0; background: transparent; color: var(--ink-dim); font-weight: 650; padding: 10px; border-radius: 999px; cursor: pointer; font-size: .95rem; }
-.mode-tab.active { background: var(--rainbow); color: #1a0f3a; }
+.mode-tab.active { background: var(--accent); color: #fff; }
 
 .setup-card { background: var(--panel); border-radius: var(--radius); padding: 18px; width: 100%; box-shadow: var(--shadow); }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; }
 .field > span { font-weight: 600; color: var(--ink-dim); }
 .seg { display: inline-flex; background: var(--bg-3); border-radius: 12px; padding: 4px; gap: 2px; }
 .seg button { border: 0; background: transparent; color: var(--ink-dim); padding: 8px 14px; border-radius: 9px; font-weight: 650; cursor: pointer; }
-.seg button.on { background: var(--rainbow); color: #1a0f3a; }
+.seg button.on { background: var(--accent); color: #fff; }
 
 .names { margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
 .name-input input { width: 100%; background: var(--bg-3); border: 1.5px solid transparent; color: var(--ink); border-radius: 10px; padding: 11px 13px; font-size: 1rem; }
@@ -92,13 +95,15 @@ body {
 
 .start-btn, #start-btn { width: 100%; margin-top: 6px; }
 .start-links { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
-.resume-banner { width: 100%; background: var(--rainbow-soft); color: #2a1850; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; font-weight: 650; }
+.resume-banner { width: 100%; background: var(--accent-soft); color: var(--ink); border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; font-weight: 650; box-shadow: inset 0 0 0 1.5px rgba(139, 92, 246, .5); }
+/* The .resume-banner display rule would otherwise override the [hidden] attribute. */
+.resume-banner[hidden] { display: none; }
 
 /* ---------------- topbar ---------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; gap: 8px; }
 .topbar h2 { margin: 0; font-size: 1.1rem; }
 .turn-pill { background: var(--panel); padding: 9px 16px; border-radius: 999px; font-weight: 700; }
-.turn-pill.yours { background: var(--rainbow); color: #1a0f3a; animation: pulse 1.6s ease-in-out infinite; }
+.turn-pill.yours { background: var(--accent); color: #fff; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { filter: brightness(1.18); } }
 
 /* ---------------- cards ---------------- */
@@ -160,6 +165,10 @@ body {
 .opp .card.mini, .opp .mini-stack { --card-w: 46px; }
 .card.on-top { position: absolute; left: 0; top: 0; }
 .mini-stack .card { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Lift the face-up card so the face-down card beneath peeks out the bottom,
+   making it obvious there's a hidden card underneath each table slot. */
+.you-table .you-stack .card.on-top { transform: translateY(-14%); }
+.opp-table .mini-stack .card.on-top { transform: translateY(-17%); }
 
 /* ---------------- center table ---------------- */
 .center-table { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 6px; }
@@ -181,6 +190,12 @@ body {
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 .card-row.hand { flex-wrap: nowrap; }
 
+/* ---------------- match-select toggle ---------------- */
+.match-row { display: flex; justify-content: center; padding: 2px 12px 0; }
+.match-row[hidden] { display: none; }
+.match-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-dim); cursor: pointer; background: var(--panel); padding: 6px 13px; border-radius: 999px; }
+.match-toggle input { width: 16px; height: 16px; accent-color: var(--accent); flex: 0 0 auto; }
+
 /* ---------------- action bar ---------------- */
 .action-bar { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .play-actions { background: var(--bg-3); }
@@ -196,7 +211,7 @@ body {
 #over-title { font-size: 1.6rem; }
 .results { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
 .result-row { display: flex; align-items: center; gap: 12px; background: var(--panel); border-radius: 12px; padding: 12px 16px; }
-.result-row.winner { background: var(--rainbow-soft); color: #2a1850; }
+.result-row.winner { background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 2px var(--accent); }
 .result-row.loser { box-shadow: inset 0 0 0 2px var(--danger); }
 .result-row .rplace { font-size: 1.4rem; width: 36px; }
 .result-row .rname { flex: 1; text-align: left; font-weight: 700; }
