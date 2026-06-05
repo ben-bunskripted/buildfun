@@ -95,9 +95,29 @@ body {
 
 .start-btn, #start-btn { width: 100%; margin-top: 6px; }
 .start-links { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
-.resume-banner { width: 100%; background: var(--accent-soft); color: var(--ink); border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; font-weight: 650; box-shadow: inset 0 0 0 1.5px rgba(139, 92, 246, .5); }
-/* The .resume-banner display rule would otherwise override the [hidden] attribute. */
-.resume-banner[hidden] { display: none; }
+
+/* ---------------- home sections ---------------- */
+.home-section { width: 100%; background: var(--panel); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+.home-section[hidden] { display: none; }
+.home-section .setup-card { background: transparent; box-shadow: none; padding: 14px 0 0; }
+.section-title { margin: 0 0 10px; font-size: 13px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-dim); }
+
+.saved-list { display: flex; flex-direction: column; gap: 8px; }
+.saved-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--bg-3); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 0 0 1.5px rgba(139, 92, 246, .35); }
+.saved-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.saved-meta .muted { font-size: 12px; }
+.saved-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* "Stats & achievements" entry button */
+.trophy-btn { width: 100%; display: flex; align-items: center; gap: 12px; background: var(--panel); border: 0; border-radius: var(--radius); padding: 14px 16px; color: var(--ink); cursor: pointer; box-shadow: var(--shadow); transition: filter .12s ease, transform .12s ease; }
+.trophy-btn:hover { filter: brightness(1.1); }
+.trophy-btn:active { transform: scale(.98); }
+.trophy-btn-icon { font-size: 1.5rem; }
+.trophy-btn-text { flex: 1; text-align: left; font-weight: 700; }
+.trophy-btn-chev { color: var(--ink-dim); font-size: 1.4rem; }
+
+.app-version { color: var(--ink-dim); opacity: .7; font-size: 12px; margin: 2px 0 0; text-align: center; }
+.app-version.stale { color: var(--danger); opacity: .95; }
 
 /* ---------------- topbar ---------------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; gap: 8px; }
@@ -120,9 +140,13 @@ body {
     repeating-linear-gradient(45deg, #6a3df0 0 8px, #4a2cc0 8px 16px);
   box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 5px #2a1a6b, 0 3px 10px rgba(0,0,0,.4);
 }
-.card.selectable { cursor: pointer; transition: transform .12s ease, box-shadow .12s; }
-.card.selectable:hover { transform: translateY(-6px); }
-.card.selected { transform: translateY(-16px); box-shadow: 0 0 0 3px var(--gold), 0 10px 22px rgba(0,0,0,.5); }
+/* Lift (hover/selected) is written into --card-y so it composes with the hand
+   fan's per-card rotation (--card-rot) instead of overriding the transform. */
+.card.selectable, .card.in-hand { transition: transform .12s ease, box-shadow .12s ease; }
+.card.selectable { cursor: pointer; transform: translateY(var(--card-y, 0)); }
+.card.in-hand { transform: rotate(var(--card-rot, 0deg)) translateY(var(--card-y, 0)); transform-origin: 50% 50%; }
+.card.selectable:hover { --card-y: -7px; }
+.card.selected { --card-y: -16px; box-shadow: 0 0 0 3px var(--gold), 0 10px 22px rgba(0,0,0,.5); }
 .card.dim { opacity: .5; filter: grayscale(.4); }
 .card.back.blind { cursor: pointer; box-shadow: inset 0 0 0 3px var(--gold), inset 0 0 0 5px #2a1a6b, 0 3px 14px rgba(255,210,63,.5); animation: pulse 1.4s infinite; }
 
@@ -188,7 +212,15 @@ body {
 .you-table { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; }
 .you-stack { width: var(--card-w); height: var(--card-h); }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
+/* Hand overlap is driven by --hand-overlap (set by layoutHand); the fan adds a
+   per-card tilt around a pivot below the row + top padding so tilted corners
+   have room. Either way the left strip of every card stays exposed so its
+   top-left rank+suit is always readable. */
 .card-row.hand { flex-wrap: nowrap; }
+.card-row.hand > .card + .card { margin-left: var(--hand-overlap, 4px); }
+.card-row.hand > .card.selected { z-index: 10; }
+.card-row.hand.fanned { padding-top: 16px; }
+.card-row.hand.fanned > .card { transform-origin: 50% 240%; }
 
 /* ---------------- match-select toggle ---------------- */
 .match-row { display: flex; justify-content: center; padding: 2px 12px 0; }
@@ -231,14 +263,25 @@ body {
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .muted { color: var(--ink-dim); }
 
-.stat-card { background: var(--panel); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+.stat-card { background: var(--panel); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
 .stat-card h3 { margin: 0 0 8px; }
 .stat-grid { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 4px 10px; font-size: .95rem; }
 .stat-grid span { color: var(--ink-dim); }
 .stat-grid b { text-align: right; }
-.ach-list { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px; }
-.ach-pip { opacity: .25; filter: grayscale(1); font-size: 1.1rem; }
-.ach-pip.got { opacity: 1; filter: none; }
+.ach-count { margin: 12px 0 8px; font-weight: 700; font-size: 13px; color: var(--gold); }
+
+/* ---------------- achievements board ---------------- */
+.achievements-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 460px) { .achievements-grid { grid-template-columns: 1fr 1fr; } }
+.achievement-card { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; background: var(--bg-3); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); text-align: left; }
+.achievement-card.is-unlocked { background: linear-gradient(180deg, rgba(255,210,63,.18), rgba(245,166,35,.1)); box-shadow: inset 0 0 0 1.5px rgba(255,210,63,.5); }
+.achievement-card.is-locked { opacity: .45; filter: grayscale(.5); }
+.achievement-icon { font-size: 1.4rem; line-height: 1; width: 30px; text-align: center; flex: 0 0 auto; }
+.achievement-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.achievement-name { font-size: 14px; font-weight: 700; color: var(--ink); }
+.achievement-desc { font-size: 12px; color: var(--ink-dim); line-height: 1.3; }
+/* Game-over unlock banner reuses the same tile. */
+.earned .achievement-card.is-unlocked { animation: pulse 1.6s ease-in-out 2; }
 
 /* ---------------- toast / banner ---------------- */
 .toast-host { position: fixed; bottom: 90px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; z-index: 60; }
