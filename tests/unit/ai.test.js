@@ -159,6 +159,35 @@ describe("planTurn — hard: swap a benny out instead of padding a set", () => {
     expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "5D"))).toBe(true);
   });
 
+  it("swaps a trapped benny free, lays it onto a set, and goes out", () => {
+    // The flip side of the trap: here reclaiming the benny WINS. A benny is
+    // trapped mid-run (8-9-W=10-J♥), so our 10♥ can only come into play via a
+    // swap. Once freed, the benny pads the complete 5-set and we discard to go
+    // out. The CPU must find this swap→meld→out line rather than holding the 10.
+    const s = turnFixture({
+      hand: ["10H"],
+      table: [
+        runSet("H", 8, [natSlot("8H"), natSlot("9H"), wildSlot("KC", "10", "H"), natSlot("JH")], { id: "run1", ownerIndex: 0 }),
+        numberSet("5", [natSlot("5S"), natSlot("5H"), natSlot("5D"), natSlot("5C")], { id: "set1", ownerIndex: 0 }),
+      ],
+      deckTop: "2C",
+      discardTop: "QD",
+    });
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "swap" && a.naturalCardId === "10H")).toBe(true);
+    expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "KC"))).toBe(true);
+    // Applied through the real engine, the line empties the hand and wins.
+    beginTurn(s);
+    let won = false;
+    for (const a of plan) {
+      const r = applyAction(s, a);
+      expect(r.ok, `action ${a.type} failed: ${r.reason}`).toBe(true);
+      if (a.type === "discard" && r.wonRound) won = true;
+    }
+    expect(won).toBe(true);
+    expect(s.players[0].hand.length).toBe(0);
+  });
+
   it("won't swap its last natural into a benny it would then be caught holding", () => {
     // Regression: a hard CPU down to a short hand whose only natural (5D) matches
     // a buried wild USED to reclaim the benny unconditionally, then get marooned
