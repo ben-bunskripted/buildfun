@@ -18,16 +18,24 @@
   <div class="start-wrap">
     <img src="assets/logo.png" alt="Sh!thead" class="hero-logo" />
 
-    <div class="resume-banner" id="resume-banner" hidden>
-      <span id="resume-text">Resume your game</span>
-      <button class="btn small" id="resume-btn">Resume</button>
+    <div class="home-section" id="saved-section" hidden>
+      <h2 class="section-title">Saved games</h2>
+      <div class="saved-list" id="saved-list"></div>
     </div>
 
-    <div class="mode-tabs" role="tablist">
-      <button class="mode-tab active" data-mode="cpu" role="tab">Solo vs CPU</button>
-      <button class="mode-tab" data-mode="local" role="tab">Pass &amp; Play</button>
-      <button class="mode-tab" data-mode="online" role="tab">Online</button>
-    </div>
+    <button type="button" class="trophy-btn" id="stats-btn">
+      <span class="trophy-btn-icon" aria-hidden="true">🏆</span>
+      <span class="trophy-btn-text">Stats &amp; achievements</span>
+      <span class="trophy-btn-chev" aria-hidden="true">›</span>
+    </button>
+
+    <div class="home-section">
+      <h2 class="section-title">New game</h2>
+      <div class="mode-tabs" role="tablist">
+        <button class="mode-tab active" data-mode="cpu" role="tab">Solo vs CPU</button>
+        <button class="mode-tab" data-mode="local" role="tab">Pass &amp; Play</button>
+        <button class="mode-tab" data-mode="online" role="tab">Online</button>
+      </div>
 
     <div class="setup-card">
       <!-- Solo / Local shared setup -->
@@ -77,12 +85,13 @@
         <p class="online-note">🌈 Online multiplayer is on the way. It will share your account across buildfun games. For now, grab some friends for <b>Pass &amp; Play</b> or take on the CPU.</p>
       </div>
     </div>
+    </div><!-- /home-section: New game -->
 
     <div class="start-links">
       <button class="link" id="howto-link">How to play</button>
-      <button class="link" id="stats-link">Stats</button>
       <button class="link" id="settings-link">Settings</button>
     </div>
+    <p class="app-version" id="app-version" title="Running version"></p>
     <p class="tagline">Don't be the Sh!thead.</p>
   </div>
 </section>
@@ -118,9 +127,8 @@
     <button class="icon-btn" id="play-exit-btn" aria-label="Save &amp; exit">⇱</button>
   </div>
 
-  <div class="opponents" id="opponents"></div>
-
-  <div class="center-table">
+  <div class="center-table" id="center-table">
+    <div class="opponents" id="opponents"></div>
     <div class="pile-zone">
       <div class="deck-stack" id="deck-stack" title="Draw pile">
         <div class="card back"></div>
@@ -129,9 +137,9 @@
       <div class="discard-zone" id="discard-zone" title="Discard pile">
         <div class="discard-empty" id="discard-empty">Pile</div>
       </div>
-      <div class="burned-zone" id="burned-zone" title="Burned">
-        <span>🔥</span><span class="count" id="burned-count">0</span>
-      </div>
+    </div>
+    <div class="burned-zone" id="burned-zone" title="Burned">
+      <span>🔥</span><span class="count" id="burned-count">0</span>
     </div>
     <div class="req-hint" id="req-hint"></div>
   </div>
@@ -181,7 +189,7 @@
 
 <div class="modal" id="modal-stats" hidden>
   <div class="modal-box">
-    <h2>Stats</h2>
+    <h2>Stats &amp; achievements</h2>
     <div id="stats-body"></div>
     <button class="btn primary" data-close-modal>Close</button>
   </div>
@@ -200,6 +208,7 @@
         <button data-sz="s">S</button><button data-sz="m" class="on">M</button><button data-sz="l">L</button><button data-sz="xl">XL</button>
       </div>
     </label>
+    <label class="toggle"><input type="checkbox" id="opt-fan" checked /> <span>Fan your hand</span></label>
     <label class="toggle"><input type="checkbox" id="opt-animate" checked /> <span>Animate CPU turns</span></label>
     <button class="btn primary" data-close-modal>Close</button>
   </div>
@@ -208,6 +217,12 @@
 <div class="modal" id="modal-menu" hidden>
   <div class="modal-box">
     <h2>Menu</h2>
+    <label class="field"><span>Card size</span>
+      <div class="seg" id="seg-cardsize-menu">
+        <button data-sz="s">S</button><button data-sz="m" class="on">M</button><button data-sz="l">L</button><button data-sz="xl">XL</button>
+      </div>
+    </label>
+    <button class="btn" id="menu-fan" aria-pressed="true">Fan your hand: On</button>
     <button class="btn" id="menu-howto">How to play</button>
     <button class="btn" id="menu-settings">Settings</button>
     <button class="btn" id="menu-restart">Restart game</button>

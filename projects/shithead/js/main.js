@@ -2,6 +2,7 @@
 // the CPU turn driver, and game-over → stats/achievements.
 
 import { renderCard, renderCardBack, setCardStyle } from "./cards.js";
+import { makeHandReorderable } from "./dragdrop.js";
 import {
   createState, applyAction, currentZone, legalSummary, serialize,
 } from "./game.js";
@@ -25,6 +26,8 @@ const ui = {
   humans: [],       // ids of all human-controlled players
   selected: [],     // selected card ids in hand/face-up
   summaries: {},    // per-human achievement tally
+  handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
+  pendingHandRender: false, // a hand rebuild deferred because a drag is live
   cpuTimer: null,
   busy: false,      // an action animation is in flight
   setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
@@ -40,7 +43,8 @@ function boot() {
   wireSwap();
   wireOver();
   renderHowto();
-  renderResume();
+  renderSaved();
+  renderVersionStamp();
   showScreen("screen-start");
 }
 
@@ -49,11 +53,15 @@ function applyPrefs() {
   document.documentElement.dataset.cardSize = prefs.cardSize || "m";
   if (prefs.animate === undefined) prefs.animate = true;
   if (prefs.selectMatching === undefined) prefs.selectMatching = true;
+  if (prefs.handFanned === undefined) prefs.handFanned = true;
   // reflect into settings controls
   segSelect("#seg-cardstyle", "cs", prefs.cardStyle || "modern");
   segSelect("#seg-cardsize", "sz", prefs.cardSize || "m");
+  segSelect("#seg-cardsize-menu", "sz", prefs.cardSize || "m");
   const anim = $("#opt-animate"); if (anim) anim.checked = prefs.animate !== false;
   const match = $("#match-toggle-input"); if (match) match.checked = prefs.selectMatching !== false;
+  const fan = $("#opt-fan"); if (fan) fan.checked = prefs.handFanned !== false;
+  syncFanLabel();
 }
 
 function savePrefs() { storage.savePrefs(prefs); }
@@ -91,7 +99,6 @@ function wireStart() {
     $("#setup-online").hidden = mode !== "online";
     $("#field-difficulty").hidden = mode !== "cpu";
     renderNames();
-    renderResume();
   }));
 
   wireSeg("#seg-players", "n", (n) => { ui.setup.players = +n; renderNames(); });
@@ -106,10 +113,20 @@ function wireStart() {
   $("#opt-replay").addEventListener("change", (e) => ui.setup.replay = e.target.checked);
 
   $("#start-btn").addEventListener("click", onDeal);
-  $("#resume-btn").addEventListener("click", onResume);
   $("#howto-link").addEventListener("click", () => openModal("modal-howto"));
   $("#settings-link").addEventListener("click", () => openModal("modal-settings"));
-  $("#stats-link").addEventListener("click", openStats);
+  $("#stats-btn").addEventListener("click", openStats);
+
+  // Saved-games section: per-row Resume / Discard.
+  $("#saved-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    const row = btn.closest(".saved-row"); if (!row) return;
+    const m = row.dataset.mode;
+    if (btn.dataset.act === "resume") resumeMode(m);
+    else if (btn.dataset.act === "discard") {
+      showConfirm("Discard this saved game?", "It will be deleted for good.", () => { storage.clear(m); renderSaved(); });
+    }
+  });
 
   renderNames();
 }
@@ -184,6 +201,7 @@ function startNewGame() {
   state = createState({ players, options });
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
+  ui.handOrders = {};
   ui.summaries = {};
   for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
@@ -271,10 +289,12 @@ function wirePlay() {
   });
   $("#play-menu-btn").addEventListener("click", () => openModal("modal-menu"));
   $("#play-exit-btn").addEventListener("click", exitToStart);
+  $("#menu-fan").addEventListener("click", () => setFan(prefs.handFanned === false));
   $("#menu-howto").addEventListener("click", () => { closeModals(); openModal("modal-howto"); });
   $("#menu-settings").addEventListener("click", () => { closeModals(); openModal("modal-settings"); });
   $("#menu-restart").addEventListener("click", () => { closeModals(); showConfirm("Restart game?", "Deal a fresh game with the same players?", () => startNewGame()); });
   $("#menu-quit").addEventListener("click", () => { closeModals(); exitToStart(); });
+  setupHandDrag();
 }
 
 function enterPlay() {
@@ -380,20 +400,27 @@ function renderPlay() {
   renderActions(viewer, myTurn, zone, summ);
 }
 
+// Seat the opponents around the central pile: one above, or to the left and
+// right, or all three (left / above / right) depending on how many there are.
+const SEATS = { 1: ["top"], 2: ["left", "right"], 3: ["left", "top", "right"] };
+
 function renderOpponents(viewer) {
   const host = $("#opponents");
   host.replaceChildren();
   const others = state.players.filter((p) => p.id !== viewer.id);
-  for (const p of others) {
+  const seats = SEATS[others.length] || others.map(() => "top");
+  others.forEach((p, idx) => {
     const el = document.createElement("div");
-    el.className = "opp";
+    el.className = "opp seat-" + (seats[idx] || "top");
     if (state.players[state.current].id === p.id && state.phase === "play") el.classList.add("active");
     if (p.finished) el.classList.add("finished");
 
     const head = document.createElement("div");
     head.className = "opp-head";
     head.innerHTML = `<span class="opp-name">${escapeHtml(p.name)}</span>` +
-      (p.finished ? `<span class="badge done">#${p.place}</span>` : `<span class="opp-count">✋ ${p.hand.length}</span>`);
+      (p.finished
+        ? `<span class="badge done">#${p.place}</span>`
+        : `<span class="opp-count">✋ ${p.hand.length}</span>`);
     el.appendChild(head);
 
     const table = document.createElement("div");
@@ -412,7 +439,7 @@ function renderOpponents(viewer) {
     }
     el.appendChild(table);
     host.appendChild(el);
-  }
+  });
 }
 
 function renderCenter(myTurn, summ) {
@@ -483,11 +510,17 @@ function renderYou(viewer, myTurn, zone, summ) {
     });
   }
 
-  // hand
-  const hHost = $("#you-hand"); hHost.replaceChildren();
-  viewer.hand.forEach((c) => {
-    const playable = myTurn && zone === "hand" && summ && summ.ranks.includes(c.rank);
+  // hand — skip the rebuild while a drag is live (the lifted node lives in
+  // <body>); onDragEnd flushes the deferred render once the drag tears down.
+  const hHost = $("#you-hand");
+  if (document.body.classList.contains("hand-dragging")) {
+    ui.pendingHandRender = true;
+    return;
+  }
+  hHost.replaceChildren();
+  orderedHand(viewer).forEach((c) => {
     const el = makeSelectableCard(c, "hand", myTurn && zone === "hand", summ);
+    el.classList.add("in-hand");
     if (myTurn && zone === "hand" && !summ.ranks.includes(c.rank)) el.classList.add("dim");
     hHost.appendChild(el);
   });
@@ -502,6 +535,18 @@ function makeSelectableCard(c, zoneName, active, summ) {
     if (ui.selected.includes(c.id)) el.classList.add("selected");
   }
   return el;
+}
+
+// The viewer's hand in the order they arranged it (via drag-reorder). Cards
+// drawn or picked up are appended in engine order; removed cards drop out.
+function orderedHand(viewer) {
+  const byCardId = new Map(viewer.hand.map((c) => [c.id, c]));
+  const prev = ui.handOrders[viewer.id] || [];
+  const order = prev.filter((id) => byCardId.has(id));
+  const have = new Set(order);
+  for (const c of viewer.hand) if (!have.has(c.id)) order.push(c.id);
+  ui.handOrders[viewer.id] = order;
+  return order.map((id) => byCardId.get(id));
 }
 
 function bindSelect(el, id, zoneName, summ) {
@@ -559,22 +604,108 @@ function renderActions(viewer, myTurn, zone, summ) {
   else info.textContent = "Select a card to play";
 }
 
-// Fit the hand fan to the dock width — always compress so every card stays
-// inside the viewport (a big pickup can balloon the hand to 20+ cards).
+// Lay out the hand in one of two modes (mirrors Benny):
+//   fanned: heavy overlap + per-card tilt around a pivot below the row, so the
+//           cards look held in a real hand.
+//   spread: minimal gap; overlap only as much as needed to fit the width.
+// Either way the left strip of every card stays visible so its top-left
+// rank+suit is always readable; the container overlap goes into --hand-overlap
+// and per-card tilt into --card-rot (both consumed by CSS).
 function layoutHand(host) {
+  host = host || $("#you-hand");
+  if (!host) return;
   const cards = $$(".card", host);
   const n = cards.length;
-  cards.forEach((c) => { c.style.marginLeft = ""; });
-  if (n <= 1) return;
-  const dockW = (host.parentElement.clientWidth || window.innerWidth) - 12;
+  host.classList.toggle("fanned", prefs.handFanned !== false);
+  cards.forEach((c) => c.style.removeProperty("--card-rot"));
+  if (n === 0) { host.style.setProperty("--hand-overlap", "4px"); return; }
+
   const cardW = cards[0].offsetWidth || 70;
-  const total = n * cardW;
-  if (total > dockW) {
-    const maxOverlap = cardW - 6;                        // squeeze to a 6px sliver for huge hands
-    const needed = (total - dockW) / (n - 1);
-    const overlap = Math.max(0, Math.min(maxOverlap, needed));
-    cards.forEach((c, i) => { if (i > 0) c.style.marginLeft = `-${overlap}px`; });
+  const dock = host.parentElement || host;
+  const available = Math.max(0, (dock.clientWidth || window.innerWidth) - 16);
+  // Never cover more than ~70% of a card, so its top-left corner always shows.
+  const minVisible = Math.max(18, Math.round(cardW * 0.30));
+
+  if (prefs.handFanned !== false) {
+    const stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
+    const edgeDeg = stepDeg * (n - 1) / 2;
+    let overlap = -Math.round(cardW * 0.45);             // show ~55% of each card
+    if (n > 1) {
+      const fannedWidth = cardW + (n - 1) * (cardW + overlap);
+      if (fannedWidth > available) {
+        overlap = (available - cardW) / (n - 1) - cardW; // tighten to fit
+        if (cardW + overlap < minVisible) overlap = minVisible - cardW;
+      }
+    }
+    host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
+    const startDeg = -edgeDeg;
+    cards.forEach((c, i) => c.style.setProperty("--card-rot", `${(startDeg + stepDeg * i).toFixed(2)}deg`));
+    return;
   }
+
+  // Spread — pack to width only if the natural layout doesn't fit.
+  const gap = 4;
+  const naturalWidth = n * cardW + (n - 1) * gap;
+  if (n === 1 || naturalWidth <= available) { host.style.setProperty("--hand-overlap", `${gap}px`); return; }
+  let overlap = (available - cardW) / (n - 1) - cardW;
+  if (cardW + overlap < minVisible) overlap = minVisible - cardW;
+  host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
+}
+
+// ---------------------------------------------------------------- hand drag/drop
+// Reorder the hand by dragging, or drag a card onto the discard pile to play it.
+// Reuses the same pointer-event module as Benny (reparent-to-body + placeholder
+// + deferred render) so the drag survives mid-render rebuilds without ghosting.
+let handDragWired = false;
+function setupHandDrag() {
+  if (handDragWired) return;
+  handDragWired = true;
+  makeHandReorderable(
+    $("#you-hand"),
+    (from, to) => {
+      const order = ui.handOrders[ui.viewerId];
+      if (!order || from < 0 || to < 0 || from >= order.length) { renderPlay(); return; }
+      const [moved] = order.splice(from, 1);
+      order.splice(Math.max(0, Math.min(order.length, to)), 0, moved);
+      renderPlay();
+    },
+    {
+      resolveDropTarget: (x, y) => {
+        const dz = $("#discard-zone");
+        if (!dz) return null;
+        const r = dz.getBoundingClientRect();
+        const pad = 28;
+        if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) {
+          return { el: dz, kind: "discard" };
+        }
+        return null;
+      },
+      onDropOnTarget: (target, cardEl) => { if (target.kind === "discard") dropPlay(cardEl.dataset.cardId); },
+      onPlaceholderMove: () => layoutHand($("#you-hand")),
+      onDragEnd: () => { if (ui.pendingHandRender) { ui.pendingHandRender = false; renderPlay(); } },
+    },
+  );
+}
+
+// A card was dragged onto the discard pile — play it (or its matching set).
+function dropPlay(id) {
+  if (!state || state.phase !== "play") { renderPlay(); return; }
+  const cur = state.players[state.current];
+  const viewer = byId(ui.viewerId);
+  if (!cur || !viewer || cur.id !== viewer.id || cur.isCPU || currentZone(cur) !== "hand") { renderPlay(); return; }
+  const card = viewer.hand.find((c) => c.id === id);
+  const summ = legalSummary(state);
+  if (!card || !summ.ranks.includes(card.rank)) { toast("You can't play that on the pile."); renderPlay(); return; }
+  let cardIds;
+  if (ui.selected.length && ui.selected.includes(id) && cardRank(viewer, ui.selected[0]) === card.rank) {
+    cardIds = ui.selected.slice();                                  // play the chosen set
+  } else if (prefs.selectMatching) {
+    cardIds = viewer.hand.filter((c) => c.rank === card.rank).map((c) => c.id); // grab matching number
+  } else {
+    cardIds = [id];
+  }
+  ui.selected = [];
+  doAction({ type: "play", playerId: cur.id, source: "hand", cardIds });
 }
 
 // ---------------------------------------------------------------- summary tracking
@@ -632,10 +763,7 @@ function endMatch() {
     if (fresh.length && (mode === "cpu" || id === ui.viewerId || ui.humans.length === 1)) {
       for (const aid of fresh) {
         const a = achievementById(aid);
-        const chip = document.createElement("div");
-        chip.className = "ach-chip";
-        chip.innerHTML = `🏆 <b>${escapeHtml(a.name)}</b> — ${escapeHtml(a.desc)}`;
-        earnedHost.appendChild(chip);
+        if (a) earnedHost.appendChild(renderAchievementCard(a, true));
       }
     }
   }
@@ -650,7 +778,7 @@ function medal(n) { return n === 1 ? "🥇" : n === 2 ? "🥈" : n === 3 ? "🥉
 
 function wireOver() {
   $("#rematch-btn").addEventListener("click", () => startNewGame());
-  $("#over-home-btn").addEventListener("click", () => { state = null; renderResume(); showScreen("screen-start"); });
+  $("#over-home-btn").addEventListener("click", () => { state = null; renderSaved(); showScreen("screen-start"); });
 }
 
 // ---------------------------------------------------------------- persistence / resume
@@ -659,13 +787,40 @@ function persist() {
   storage.save({ mode, state: serialize(state), ui: { humanId: ui.humanId, humans: ui.humans, viewerId: ui.viewerId, summaries: ui.summaries } });
 }
 
-function renderResume() {
-  const snap = storage.load(mode);
-  const banner = $("#resume-banner");
-  if (!snap || mode === "online") { banner.hidden = true; return; }
-  banner.hidden = false;
-  const ago = timeAgo(snap.savedAt);
-  $("#resume-text").textContent = `Resume your ${mode === "cpu" ? "solo" : "pass & play"} game · ${ago}`;
+const MODE_LABEL = { cpu: "Solo vs CPU", local: "Pass & Play" };
+function renderSaved() {
+  const list = $("#saved-list");
+  const section = $("#saved-section");
+  if (!list || !section) return;
+  const saves = storage.loadAll();          // { cpu?: snap, local?: snap }
+  const modes = Object.keys(saves);
+  list.replaceChildren();
+  if (!modes.length) { section.hidden = true; return; }
+  section.hidden = false;
+  for (const m of modes) {
+    const snap = saves[m];
+    const row = document.createElement("div");
+    row.className = "saved-row"; row.dataset.mode = m;
+    row.innerHTML =
+      `<div class="saved-meta"><b>${escapeHtml(MODE_LABEL[m] || m)}</b>` +
+      `<span class="muted">${escapeHtml(timeAgo(snap.savedAt))}</span></div>` +
+      `<div class="saved-actions">` +
+      `<button class="btn small primary" data-act="resume">Resume</button>` +
+      `<button class="btn small ghost" data-act="discard">Discard</button></div>`;
+    list.appendChild(row);
+  }
+}
+
+// Resume a specific saved mode from the saved-games list — switch the active
+// mode (and its setup tab) to match, then load its snapshot.
+function resumeMode(m) {
+  mode = m;
+  $$(".mode-tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
+  const off = $("#setup-offline"), on = $("#setup-online"), diff = $("#field-difficulty");
+  if (off) off.hidden = mode === "online";
+  if (on) on.hidden = mode !== "online";
+  if (diff) diff.hidden = mode !== "cpu";
+  onResume();
 }
 
 function onResume() {
@@ -677,6 +832,7 @@ function onResume() {
   ui.summaries = snap.ui.summaries || {};
   for (const id of ui.humans) if (!ui.summaries[id]) ui.summaries[id] = { ...emptySummary(), total: state.players.length };
   ui.selected = [];
+  ui.handOrders = {};
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
@@ -686,7 +842,7 @@ function exitToStart() {
   clearTimeout(ui.cpuTimer);
   persist();
   state = null;
-  renderResume();
+  renderSaved();
   showScreen("screen-start");
 }
 
@@ -697,20 +853,93 @@ function showPass(name, cb) {
 }
 
 // ---------------------------------------------------------------- settings
+function setCardSize(v) {
+  prefs.cardSize = v;
+  document.documentElement.dataset.cardSize = v;
+  segSelect("#seg-cardsize", "sz", v);
+  segSelect("#seg-cardsize-menu", "sz", v);
+  savePrefs();
+  if (state) renderPlay();
+}
+function setFan(on) {
+  prefs.handFanned = !!on;
+  savePrefs();
+  const fan = $("#opt-fan"); if (fan) fan.checked = !!on;
+  syncFanLabel();
+  if (state) layoutHand($("#you-hand"));
+}
+function syncFanLabel() {
+  const btn = $("#menu-fan");
+  if (!btn) return;
+  btn.textContent = prefs.handFanned !== false ? "Fan your hand: On" : "Fan your hand: Off";
+  btn.setAttribute("aria-pressed", String(prefs.handFanned !== false));
+}
+
 function wireSettings() {
   wireSeg("#seg-cardstyle", "cs", (v) => { prefs.cardStyle = v; setCardStyle(v); savePrefs(); if (state) renderPlay(); });
-  wireSeg("#seg-cardsize", "sz", (v) => { prefs.cardSize = v; document.documentElement.dataset.cardSize = v; savePrefs(); if (state) renderPlay(); });
+  wireSeg("#seg-cardsize", "sz", setCardSize);
+  wireSeg("#seg-cardsize-menu", "sz", setCardSize);
   $("#opt-animate").addEventListener("change", (e) => { prefs.animate = e.target.checked; savePrefs(); });
-  $("#menu-settings") && null;
+  $("#opt-fan").addEventListener("change", (e) => setFan(e.target.checked));
+}
+
+// ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
+// CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
+const APP_BUILD = "v6";
+function formatBuild(ver) {
+  const n = String(ver).replace(/^v/i, "").padStart(3, "0");
+  return "v." + n.split("").join(".");
+}
+async function renderVersionStamp() {
+  const el = $("#app-version");
+  if (!el) return;
+  let cacheVer = null;
+  try {
+    if (globalThis.caches) {
+      const keys = await caches.keys();
+      const k = keys.find((x) => x.startsWith("shithead-"));
+      if (k) cacheVer = k.replace(/^shithead-/, "");
+    }
+  } catch (_) { /* caches unavailable (private mode) — show the build only */ }
+  if (cacheVer && cacheVer !== APP_BUILD) {
+    el.textContent = `Sh!thead ${formatBuild(APP_BUILD)} · cache ${formatBuild(cacheVer)} — refresh to update`;
+    el.classList.add("stale");
+  } else {
+    el.textContent = `Sh!thead ${formatBuild(APP_BUILD)}`;
+    el.classList.remove("stale");
+  }
 }
 
 // ---------------------------------------------------------------- stats modal
+// A single achievement tile: icon + name + description, dimmed when locked.
+function renderAchievementCard(a, unlocked) {
+  const el = document.createElement("div");
+  el.className = `achievement-card ${unlocked ? "is-unlocked" : "is-locked"}`;
+  el.innerHTML =
+    `<div class="achievement-icon" aria-hidden="true">${a.icon || "🏆"}</div>` +
+    `<div class="achievement-info">` +
+    `<div class="achievement-name">${escapeHtml(a.name)}</div>` +
+    `<div class="achievement-desc">${escapeHtml(a.desc)}</div></div>`;
+  return el;
+}
+function achievementsGrid(unlockedIds) {
+  const grid = document.createElement("div");
+  grid.className = "achievements-grid";
+  const set = new Set(unlockedIds || []);
+  for (const a of ACHIEVEMENTS) grid.appendChild(renderAchievementCard(a, set.has(a.id)));
+  return grid;
+}
+
 function openStats() {
   const body = $("#stats-body");
   const profiles = listProfiles();
   body.replaceChildren();
   if (!profiles.length) {
-    body.innerHTML = `<p class="muted">No games played yet. Play a game to start tracking your stats and achievements.</p>`;
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent = "No games played yet — here's everything there is to unlock:";
+    body.appendChild(note);
+    body.appendChild(achievementsGrid([]));
   } else {
     for (const prof of profiles) {
       const s = prof.stats;
@@ -723,7 +952,8 @@ function openStats() {
           <span>Sh!thead</span><b>${s.shitheads}</b>
           <span>Best streak</span><b>${s.bestStreak}</b>
         </div>
-        <div class="ach-list">${ACHIEVEMENTS.map((a) => `<span class="ach-pip ${prof.achievements.includes(a.id) ? "got" : ""}" title="${escapeHtml(a.name)}: ${escapeHtml(a.desc)}">🏆</span>`).join("")}</div>`;
+        <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
+      div.appendChild(achievementsGrid(prof.achievements));
       body.appendChild(div);
     }
   }
