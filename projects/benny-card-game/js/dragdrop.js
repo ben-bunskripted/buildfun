@@ -22,6 +22,7 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
   const resolveDropTarget = opts.resolveDropTarget || (() => null);
   const onDropOnTarget = opts.onDropOnTarget || (() => {});
   const onPlaceholderMove = opts.onPlaceholderMove || (() => {});
+  const onDragEnd = opts.onDragEnd || (() => {});
   let active = null;
   let currentTarget = null;
   function clearTargetHover() {
@@ -224,7 +225,14 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
         // (before reparenting); the placeholder marks the destination slot
         // in the live hand.
         const fromIndex = ctx.fromIndex;
-        const toIndex = [...handEl.children].indexOf(ctx.placeholder);
+        // The placeholder is normally still in the hand, but a render that
+        // rebuilt #hand mid-drag could have discarded it. If it's gone, the
+        // rebuilt hand already holds a fresh copy of this card, so we must NOT
+        // re-insert the lifted node (that's the duplication bug) — just drop it.
+        const placeholderLive = !!ctx.placeholder && ctx.placeholder.isConnected;
+        const toIndex = placeholderLive
+          ? [...handEl.children].indexOf(ctx.placeholder)
+          : -1;
 
         // Was the pointer over an external drop target on release?
         const finalTarget = currentTarget;
@@ -237,12 +245,17 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
         card.style.width = "";
         card.style.zIndex = "";
         card.classList.remove("dragging");
-        ctx.placeholder.replaceWith(card);
+        if (placeholderLive) {
+          ctx.placeholder.replaceWith(card);
+        } else {
+          card.remove();
+        }
 
         if (commit && finalTarget) {
-          // External drop wins over an in-hand reorder.
+          // External drop wins over an in-hand reorder. Uses card.dataset, not
+          // DOM position, so it works even if the node was just removed above.
           onDropOnTarget(finalTarget, card);
-        } else if (commit && fromIndex !== -1) {
+        } else if (commit && placeholderLive && fromIndex !== -1) {
           // Always re-render the hand on drop, even when the card lands in
           // its original slot. Otherwise the dragged DOM node keeps its
           // identity and the prior `position:fixed` / .dragging cycle can
@@ -266,6 +279,9 @@ export function makeHandReorderable(handEl, onReorder, opts = {}) {
         setTimeout(() => window.removeEventListener("click", stopClick, true), 80);
       }
       active = null;
+      // Drag is fully torn down (hand-dragging removed above) — let the host
+      // flush any hand render it deferred while the card was lifted.
+      onDragEnd();
     }
 
     // Listen on `window`, not the dragged card. iOS Safari can silently drop
