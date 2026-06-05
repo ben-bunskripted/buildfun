@@ -208,7 +208,10 @@ export function legalSummary(state) {
 
 function refillHand(state, p) {
   const drew = [];
-  while (p.hand.length < 3 && state.deck.length > 0) {
+  // Top the hand back up to 3 from the deck. The freshly drawn cards live in
+  // `drew` until the loop ends, so the guard must count them too — otherwise
+  // p.hand.length never moves and the whole deck gets drawn in one go.
+  while (p.hand.length + drew.length < 3 && state.deck.length > 0) {
     drew.push(state.deck.shift());
   }
   if (drew.length) {

@@ -79,6 +79,15 @@ describe("playing", () => {
     expect(s.current).toBe(1);
   });
 
+  it("refills to exactly three from a larger deck — never drains the deck", () => {
+    const s = baseState();
+    s.players[0].hand = cs("5S", "6H", "7D");          // a full 3-card hand
+    s.deck = cs("KD", "QD", "JD", "TS", "9C", "8H");   // plenty left in the deck
+    applyAction(s, { type: "play", playerId: "a", source: "hand", cardIds: ["5S"] });
+    expect(s.players[0].hand.length).toBe(3);          // drew exactly 1, not the lot
+    expect(s.deck.length).toBe(5);                     // only one card left the deck
+  });
+
   it("rejects an illegal play (no-op)", () => {
     const s = baseState();
     s.players[0].hand = cs("4S", "9H");
