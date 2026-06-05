@@ -1385,7 +1385,20 @@ function applyHandOrderPref(player) {
   ui.handOrder = ordered.map(c => c.id);
 }
 
+// Set while a hand card is mid-drag and a render asked to rebuild the hand.
+// A drag lifts a card out to <body> and leaves a placeholder in its slot;
+// wiping #hand here would discard that placeholder (orphaning the lifted node)
+// and re-render a duplicate of the dragged card from state, which in turn
+// breaks the fan layout and makes the hand vanish. We defer the rebuild until
+// the drag ends (flushed from the makeHandReorderable onDragEnd hook below).
+let pendingHandRender = false;
+
 function renderHand() {
+  if (document.body.classList.contains("hand-dragging")) {
+    pendingHandRender = true;
+    return;
+  }
+  pendingHandRender = false;
   const hand = $("hand");
   hand.innerHTML = "";
   const me = state.players[handViewerIdx()];
@@ -1720,6 +1733,16 @@ function wireUp() {
       resolveDropTarget: resolveDropTarget,
       onDropOnTarget: handleDropOnTarget,
       onPlaceholderMove: layoutHand,
+      // The drag is over — flush any hand render that was deferred while the
+      // card was lifted (see pendingHandRender). The commit callbacks above
+      // (onReorder / onDropOnTarget) usually re-render on their own, but a
+      // cancelled or no-op drop wouldn't, leaving the deferred state pending.
+      onDragEnd: () => {
+        if (pendingHandRender) {
+          pendingHandRender = false;
+          renderHand();
+        }
+      },
     },
   );
 
