@@ -200,6 +200,67 @@ describe("jokers", () => {
     expect(s.current).toBe(before.current);
     expect(s.jokerAttack).toBe(true);
   });
+
+  it("a joker answers a joker (acts as a 3) and passes the attack on", () => {
+    const s = mk3();
+    s.players[0].hand = cs("JK1", "5C");
+    s.players[1].hand = cs("JK2", "9C");   // 'b' has no 3 but holds the other joker
+    s.players[2].hand = cs("8C");
+    applyAction(s, { type: "play", playerId: "a", source: "hand", cardIds: ["JK1"] });
+    expect(s.current).toBe(1);
+    expect(legalSummary(s).ranks).toEqual(["JK"]);   // the joker counts as an answer
+
+    applyAction(s, { type: "play", playerId: "b", source: "hand", cardIds: ["JK2"] });
+    expect(s.jokerAttack).toBe(true);      // attack passes on, still unresolved
+    expect(s.current).toBe(2);
+    expect(s.lastEvent.deflect).toBe(true);
+    expect(s.lastEvent.rank).toBe("JK");
+    expect(legalSummary(s).mustPickup).toBe(true);   // 'c' can't answer
+  });
+
+  it("a blind face-down flip deflects the joker when it lands a 3", () => {
+    const s = mk3();
+    s.players[0].hand = cs("JK1", "5C");
+    s.players[1].hand = [];
+    s.players[1].faceUp = [];
+    s.players[1].faceDown = cs("3H", "9C"); // 'b' is down to blind cards
+    s.players[2].hand = cs("8C");
+    applyAction(s, { type: "play", playerId: "a", source: "hand", cardIds: ["JK1"] });
+    expect(s.current).toBe(1);
+    const summ = legalSummary(s);
+    expect(summ.underAttack).toBe(true);
+    expect(summ.blind).toBe(true);          // flip in full view, not a forced pickup
+    expect(summ.mustPickup).toBe(false);
+
+    applyAction(s, { type: "play", playerId: "b", source: "faceDown", cardIds: ["3H"] });
+    expect(s.jokerAttack).toBe(true);       // 3 flipped → attack passes on
+    expect(s.current).toBe(2);
+    expect(s.players[1].faceDown.map((c) => c.id)).toEqual(["9C"]);
+    expect(s.pile.some((c) => c.id === "3H")).toBe(true);
+    expect(s.lastEvent.deflect).toBe(true);
+    expect(s.lastEvent.wasBlind).toBe(true);
+  });
+
+  it("a blind face-down flip that misses scoops the pile plus the flipped card", () => {
+    const s = mk3();
+    s.players[0].hand = cs("JK1", "5C");
+    s.players[1].hand = [];
+    s.players[1].faceUp = [];
+    s.players[1].faceDown = cs("9C", "4D");
+    s.pile = cs("KS");                       // a card already on the pile
+    applyAction(s, { type: "play", playerId: "a", source: "hand", cardIds: ["JK1"] });
+    expect(s.current).toBe(1);
+
+    applyAction(s, { type: "play", playerId: "b", source: "faceDown", cardIds: ["9C"] });
+    expect(s.jokerAttack).toBe(false);      // attack resolved by the pickup
+    expect(s.pile.length).toBe(0);
+    // the whole pile (KS + JK1) plus the flipped 9C land in 'b's hand
+    expect(s.players[1].hand.map((c) => c.id).sort()).toEqual(["9C", "JK1", "KS"].sort());
+    expect(s.players[1].faceDown.map((c) => c.id)).toEqual(["4D"]);
+    expect(s.lastEvent.type).toBe("blindFail");
+    expect(s.lastEvent.fromJoker).toBe(true);
+    expect(s.current).toBe(2);
+  });
 });
 
 describe("reverse-mode 8", () => {

@@ -10,7 +10,7 @@
 
 import {
   RANKS, SUITS, JOKER, value, defaultOptions, requirement, canPlayRank,
-  burnsPile, playableRanks, compareForHand, isJoker, isJokerDefence,
+  burnsPile, playableRanks, compareForHand, isJoker, isJokerAnswer,
 } from "./rules.js";
 import { shuffleInPlace } from "./rng.js";
 
@@ -208,15 +208,16 @@ export function legalSummary(state) {
   const base = { zone, ranks: [], mustPickup: false, blind: false, underAttack: false, canTakeFaceUp: false };
   if (!zone) return { ...base, zone: null };
 
-  // Under a joker attack the only escape is to play a 3 from a visible zone;
-  // otherwise (no 3, or down to blind face-down cards) the pile must be taken.
-  // (A 3 may still be played straight off the face-up row to deflect.)
+  // Under a joker attack the escape is to answer with a 3 (or another joker) from
+  // a visible zone; otherwise the pile must be taken. Down to blind face-down
+  // cards, the card is still flipped in full view — it deflects if it happens to
+  // be a 3/joker, and is scooped up with the pile otherwise (see doFaceDown…).
   if (state.jokerAttack) {
     if (zone === "faceDown") {
-      return { ...base, mustPickup: true, underAttack: true };
+      return { ...base, blind: true, underAttack: true };
     }
-    const has3 = p[zone].some((c) => isJokerDefence(c.rank));
-    return { ...base, ranks: has3 ? ["3"] : [], mustPickup: !has3, underAttack: true };
+    const answers = [...new Set(p[zone].filter((c) => isJokerAnswer(c.rank, state.options)).map((c) => c.rank))];
+    return { ...base, ranks: answers, mustPickup: answers.length === 0, underAttack: true };
   }
 
   if (zone === "faceDown") {
@@ -287,12 +288,14 @@ function doPlay(state, { playerId, source, cardIds }) {
   const zone = currentZone(p);
   if (!zone || (source && source !== zone)) return;
 
-  // While under a joker attack the only legal play is a 3 from a visible zone.
+  // While under a joker attack the only legal play is a 3 (or another joker) from
+  // a visible zone — or a blind flip of a face-down card, which is turned over in
+  // full view and either deflects (a 3/joker) or is scooped up with the pile.
   if (state.jokerAttack) {
-    if (zone === "faceDown") return;                       // must pick up instead
+    if (zone === "faceDown") return doFaceDownUnderAttack(state, p, cardIds && cardIds[0]);
     const cards = p[zone].filter((c) => cardIds.includes(c.id));
     if (cards.length === 0 || cards.length !== cardIds.length) return;
-    if (!cards.every((c) => isJokerDefence(c.rank))) return;
+    if (!cards.every((c) => isJokerAnswer(c.rank, state.options))) return;
     return deflectJoker(state, p, zone, cards);
   }
 
@@ -331,11 +334,13 @@ function doTakeFaceUp(state, { playerId, cardIds }) {
   state.lastEvent = { type: "takeFaceUp", playerId: p.id, cards: take };
 }
 
-// Answer a joker with one or more 3s: they land on the pile and the obligation
-// to take it passes, unchanged, to the next player. No burns resolve mid-chain.
-function deflectJoker(state, p, zone, cards) {
+// Answer a joker with one or more 3s (or another joker): they land on the pile
+// and the obligation to take it passes, unchanged, to the next player. No burns
+// resolve mid-chain.
+function deflectJoker(state, p, zone, cards, wasBlind = false) {
   const ids = new Set(cards.map((c) => c.id));
   p[zone] = p[zone].filter((c) => !ids.has(c.id));
+  forgetPlayed(state, p.id, cards);
   state.pile.push(...cards);
 
   const drew = zone === "hand" ? refillHand(state, p) : [];
@@ -343,13 +348,43 @@ function deflectJoker(state, p, zone, cards) {
 
   state.lastEvent = {
     type: "play", playerId: p.id, zone, cards, burned: false, skip: 0,
-    drew, finished, wasBlind: false, rank: "3", deflect: true,
+    drew, finished, wasBlind, rank: cards[0].rank, deflect: true,
   };
 
   if (checkGameOver(state)) return;
   // jokerAttack stays true — the next player now faces the same pile.
   state.current = nextActiveIndex(state, state.current, 1);
   state.turn++;
+}
+
+// Under a joker attack with only blind face-down cards left: flip one in full
+// view on top of the joker pile. A 3 (or another joker) deflects the attack to
+// the next player; anything else means the whole pile — flipped card included —
+// is scooped up immediately, ending the attack.
+function doFaceDownUnderAttack(state, p, cardId) {
+  let idx = cardId ? p.faceDown.findIndex((c) => c.id === cardId) : 0;
+  if (idx < 0) idx = 0;
+  const card = p.faceDown[idx];
+  if (!card) return;
+  p.faceDown.splice(idx, 1);
+
+  if (isJokerAnswer(card.rank, state.options)) {
+    // The flip happens to answer the joker — re-insert so deflectJoker can pull
+    // it from the zone uniformly, then pass the attack on (flagged as blind).
+    p.faceDown.splice(idx, 0, card);
+    return deflectJoker(state, p, "faceDown", [card], /*wasBlind*/ true);
+  }
+
+  // No defence — the flipped card joins the pile and the player scoops it all.
+  const taken = state.pile.concat([card]);
+  state.pile = [];
+  state.jokerAttack = false;
+  p.hand.push(...taken);
+  p.hand.sort(compareForHand);
+  state.lastEvent = { type: "blindFail", playerId: p.id, card, count: taken.length, fromJoker: true };
+  state.current = nextActiveIndex(state, state.current, 1);
+  state.turn++;
+  checkGameOver(state);
 }
 
 // Blind face-down flip: reveal one card; it stays if legal, otherwise the player

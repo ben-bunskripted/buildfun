@@ -37,10 +37,12 @@ No install, no bundler. Modern-browser features are used unconditionally
     bounces back so you go again) · **invisible** (see through to the card
     below) · **skip** the next player.
   - **Jokers** — adds 2 jokers (54-card deck). Playing one forces the next
-    player to take the **whole pile**, unless they answer with a `3`, which
-    passes that obligation down the line until someone without a `3` scoops it
-    all. A `3` has no power of its own — it is purely a joker defence.
-    *Off by default.*
+    player to take the **whole pile**, unless they answer with a `3` (or another
+    joker, which acts as a `3`), passing that obligation down the line until
+    someone with no answer scoops it all. A player down to blind face-down cards
+    still flips one in full view: a `3`/joker deflects, otherwise they take the
+    pile (the flipped card included). A `3` has no power of its own — it is
+    purely a joker defence. *Off by default.*
   - Four-of-a-kind burns the pile (including completing it across turns).
 - Pre-game swap phase (hand ↔ face-up), optional.
 - Endgame: hand → face-up → face-down blind flips.

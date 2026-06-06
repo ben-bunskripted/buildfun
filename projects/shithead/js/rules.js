@@ -48,6 +48,13 @@ export function isJoker(rank) { return rank === JOKER; }
 // A 3 only matters as the answer to a joker — it has no power of its own.
 export function isJokerDefence(rank) { return rank === "3"; }
 
+// Can this rank answer a live joker attack? A 3 always can; and (when jokers are
+// enabled) so can another joker — a joker laid on a joker acts as a 3, passing
+// the obligation on rather than starting a fresh attack.
+export function isJokerAnswer(rank, options) {
+  return rank === "3" || (rank === JOKER && !!(options && options.jokers));
+}
+
 // Cards that can be laid on anything regardless of the pile requirement: an
 // enabled 2 or 10, an invisible-mode 8, and (when in play) a joker.
 export function isAlwaysPlayable(rank, options) {
