@@ -498,6 +498,16 @@ function onBlindFlip(cardId) {
   doAction({ type: "play", playerId: cur.id, source: "faceDown", cardIds: [cardId] });
 }
 
+// Endgame: pull a face-up table card into the hand (doesn't end the turn — the
+// player then plays from hand as usual).
+function onTakeFaceUp(cardId) {
+  if (state.phase !== "play") return;
+  const cur = state.players[state.current];
+  if (cur.id !== ui.viewerId || cur.isCPU) return;
+  ui.selected = [];
+  doAction({ type: "takeFaceUp", playerId: cur.id, cardIds: [cardId] });
+}
+
 // ---------------------------------------------------------------- play render
 function renderPlay() {
   if (!state) return;
@@ -511,6 +521,7 @@ function renderPlay() {
   const pill = $("#turn-pill");
   if (state.phase === "over") pill.textContent = "Game over";
   else if (myTurn && summ && summ.underAttack) pill.textContent = "🃏 Joker! Play a 3 or pick up";
+  else if (myTurn && summ && summ.canTakeFaceUp && zone === "faceUp") pill.textContent = "Take your face-up cards";
   else if (myTurn) pill.textContent = zone === "faceDown" ? "Flip a face-down card" : "Your turn";
   else pill.textContent = `${cur.name} is playing…`;
   pill.classList.toggle("yours", myTurn);
@@ -607,22 +618,38 @@ function renderYou(viewer, myTurn, zone, summ) {
   const fdHost = $("#you-facedown"); fdHost.replaceChildren();
   // No blind flips while under a joker attack — the pile must be taken.
   const blindActive = myTurn && zone === "faceDown" && !(summ && summ.underAttack);
+  // Endgame: tap face-up cards to take them into hand (not under attack).
+  const takeActive = myTurn && summ && summ.canTakeFaceUp;
+  // Joker deflection straight off the face-up row still uses select-to-play.
+  const deflectActive = myTurn && summ && summ.underAttack && zone === "faceUp";
   viewer.faceDown.forEach((c, i) => {
     const stack = document.createElement("div");
     stack.className = "mini-stack you-stack";
     const back = renderCardBack({ className: blindActive ? "selectable blind" : "" });
     if (blindActive) back.addEventListener("click", () => onBlindFlip(c.id));
     stack.appendChild(back);
-    if (viewer.faceUp[i]) stack.appendChild(renderCard(viewer.faceUp[i], { className: "on-top" + (zone === "faceUp" && myTurn ? " selectable" : "") }));
+    if (viewer.faceUp[i]) {
+      const up = renderCard(viewer.faceUp[i], { className: "on-top" });
+      if (takeActive) { up.classList.add("takeable"); up.addEventListener("click", () => onTakeFaceUp(viewer.faceUp[i].id)); }
+      stack.appendChild(up);
+    }
     fdHost.appendChild(stack);
   });
   // any standalone face-up (when fewer face-down than face-up)
   const fuHost = $("#you-faceup"); fuHost.replaceChildren();
   if (viewer.faceDown.length === 0) {
-    viewer.faceUp.forEach((c) => fuHost.appendChild(makeSelectableCard(c, "faceUp", myTurn && zone === "faceUp", summ)));
+    viewer.faceUp.forEach((c) => {
+      if (takeActive) {
+        const el = renderCard(c, { className: "takeable" });
+        el.addEventListener("click", () => onTakeFaceUp(c.id));
+        fuHost.appendChild(el);
+      } else {
+        fuHost.appendChild(makeSelectableCard(c, "faceUp", deflectActive, summ));
+      }
+    });
   }
-  if (zone === "faceUp" && myTurn && viewer.faceDown.length > 0) {
-    // face-up cards sit on top of the stacks; make those selectable
+  if (deflectActive && viewer.faceDown.length > 0) {
+    // Under attack: the face-up cards sit on the stacks; make the 3s selectable.
     $$("#you-facedown .on-top").forEach((el) => {
       const id = el.dataset.cardId;
       el.classList.add("selectable");
@@ -708,16 +735,20 @@ function renderActions(viewer, myTurn, zone, summ) {
   const pickBtn = $("#pickup-btn");
   const info = $("#sel-info");
   const canAct = myTurn && !viewer.isCPU;
-  playBtn.disabled = !(canAct && zone !== "faceDown" && ui.selected.length > 0);
-  pickBtn.disabled = !(canAct && zone !== "faceDown" && state.pile.length > 0);
-  pickBtn.hidden = !canAct;
-  playBtn.hidden = !canAct || zone === "faceDown";
+  // Empty hand + face-up cards left → the only move is to take them in.
+  const takeOnly = canAct && summ && summ.canTakeFaceUp && zone === "faceUp";
+  playBtn.disabled = !(canAct && !takeOnly && zone !== "faceDown" && ui.selected.length > 0);
+  pickBtn.disabled = !(canAct && !takeOnly && zone !== "faceDown" && state.pile.length > 0);
+  pickBtn.hidden = !canAct || takeOnly;
+  playBtn.hidden = !canAct || takeOnly || zone === "faceDown";
   const matchRow = $("#match-row");
-  if (matchRow) matchRow.hidden = !(canAct && zone !== "faceDown");
+  if (matchRow) matchRow.hidden = !(canAct && !takeOnly && zone !== "faceDown");
 
   if (!canAct) { info.textContent = ""; return; }
-  if (summ && summ.underAttack && summ.mustPickup) info.textContent = "No 3 — pick up the pile";
+  if (takeOnly) info.textContent = "Tap your face-up cards to take them into your hand";
+  else if (summ && summ.underAttack && summ.mustPickup) info.textContent = "No 3 — pick up the pile";
   else if (zone === "faceDown") info.textContent = "Tap a face-down card to flip it";
+  else if (summ && summ.canTakeFaceUp) info.textContent = "Play a card, or tap a face-up card to take it in";
   else if (ui.selected.length) {
     const r = cardRank(viewer, ui.selected[0]);
     info.textContent = `${ui.selected.length}× ${r}`;
@@ -1032,7 +1063,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v10";
+const APP_BUILD = "v11";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");

@@ -119,6 +119,7 @@ export function applyAction(state, action) {
     case "ready":  doReady(state, action); break;
     case "play":   doPlay(state, action); break;
     case "pickup": doPickup(state, action); break;
+    case "takeFaceUp": doTakeFaceUp(state, action); break;
     default: break;
   }
   tickStale(state);
@@ -192,23 +193,40 @@ export function currentZone(player) {
 export function legalSummary(state) {
   const p = state.players[state.current];
   const zone = currentZone(p);
-  if (!zone) return { zone: null, ranks: [], mustPickup: false, blind: false, underAttack: false };
+  // Once the deck is spent, face-up cards top the hand back up to 3 (the player
+  // taps them in, then plays from hand). Available whenever there's room.
+  const canTakeFaceUp = canTakeFaceUpNow(state, p);
+  const base = { zone, ranks: [], mustPickup: false, blind: false, underAttack: false, canTakeFaceUp: false };
+  if (!zone) return { ...base, zone: null };
 
   // Under a joker attack the only escape is to play a 3 from a visible zone;
   // otherwise (no 3, or down to blind face-down cards) the pile must be taken.
+  // (A 3 may still be played straight off the face-up row to deflect.)
   if (state.jokerAttack) {
     if (zone === "faceDown") {
-      return { zone, ranks: [], mustPickup: true, blind: false, underAttack: true };
+      return { ...base, mustPickup: true, underAttack: true };
     }
     const has3 = p[zone].some((c) => isJokerDefence(c.rank));
-    return { zone, ranks: has3 ? ["3"] : [], mustPickup: !has3, blind: false, underAttack: true };
+    return { ...base, ranks: has3 ? ["3"] : [], mustPickup: !has3, underAttack: true };
   }
 
   if (zone === "faceDown") {
-    return { zone, ranks: [], mustPickup: false, blind: true, underAttack: false };
+    return { ...base, blind: true };
   }
+  // Face-up cards (empty hand) — must be taken into hand before any play.
+  if (zone === "faceUp") {
+    return { ...base, canTakeFaceUp: true };
+  }
+  // Normal hand turn — but you may also top up from face-up if the deck's gone.
   const ranks = playableRanks(p[zone], state.pile, state.options);
-  return { zone, ranks, mustPickup: ranks.length === 0, blind: false, underAttack: false };
+  return { ...base, ranks, mustPickup: ranks.length === 0, canTakeFaceUp };
+}
+
+// May the current player pull face-up cards into hand right now? Only once the
+// deck is gone, there are face-up cards left, the hand has room (< 3), and
+// they're not pinned by a joker attack.
+function canTakeFaceUpNow(state, p) {
+  return !state.jokerAttack && state.deck.length === 0 && p.faceUp.length > 0 && p.hand.length < 3;
 }
 
 function refillHand(state, p) {
@@ -270,6 +288,10 @@ function doPlay(state, { playerId, source, cardIds }) {
   }
 
   if (zone === "faceDown") return doFaceDown(state, p, cardIds && cardIds[0]);
+  // Face-up cards can't be played straight to the pile — they must be taken
+  // into hand first (see doTakeFaceUp). The joker-defence case above is the
+  // only time a card leaves the face-up row directly.
+  if (zone === "faceUp") return;
 
   const cards = p[zone].filter((c) => cardIds.includes(c.id));
   if (cards.length === 0 || cards.length !== cardIds.length) return;
@@ -280,6 +302,24 @@ function doPlay(state, { playerId, source, cardIds }) {
   if (!canPlayRank(rank, req, state.options)) return; // illegal — caller pre-checks
 
   commitPlay(state, p, zone, cards);
+}
+
+// Take face-up table cards into the hand (up to 3) once the hand is empty and
+// the deck is spent. Does NOT end the turn — the player then plays from hand as
+// usual. Blind face-down cards are untouched (those stay a one-per-turn gamble).
+function doTakeFaceUp(state, { playerId, cardIds }) {
+  if (state.phase !== "play") return;
+  const p = state.players[state.current];
+  if (!p || p.id !== playerId || p.finished) return;
+  if (!canTakeFaceUpNow(state, p)) return;       // deck gone, face-up left, hand has room
+  const want = new Set(cardIds || []);
+  const take = p.faceUp.filter((c) => want.has(c.id)).slice(0, 3 - p.hand.length);
+  if (take.length === 0) return;
+  const taken = new Set(take.map((c) => c.id));
+  p.faceUp = p.faceUp.filter((c) => !taken.has(c.id));
+  p.hand.push(...take);
+  p.hand.sort(compareForHand);
+  state.lastEvent = { type: "takeFaceUp", playerId: p.id, cards: take };
 }
 
 // Answer a joker with one or more 3s: they land on the pile and the obligation

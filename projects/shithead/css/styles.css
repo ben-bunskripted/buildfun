@@ -230,6 +230,11 @@ body {
 .mini-stack { position: relative; }
 .mini-stack .card { position: absolute; inset: 0; width: 100%; height: 100%; }
 .card.on-top { position: absolute; left: 0; top: 0; }
+/* Endgame: face-up cards you can tap to pull into your hand. */
+.card.takeable { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: calc(var(--card-w) * .11); animation: takeablePulse 1.5s ease-in-out infinite; }
+.card.takeable:hover { filter: brightness(1.08); }
+@keyframes takeablePulse { 0%, 100% { outline-color: var(--gold); } 50% { outline-color: color-mix(in srgb, var(--gold) 35%, transparent); } }
+
 /* Lift the face-up card so the face-down card beneath peeks out the bottom,
    making it obvious there's a hidden card underneath each table slot. */
 .you-table .you-stack .card.on-top { transform: translateY(-14%); }

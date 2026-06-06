@@ -79,10 +79,12 @@ describe("CPU self-play", () => {
     let i = 0;
     while (s.phase === "play" && i < 2000) {
       const before = s.turn;
-      applyAction(s, planTurn(s));
+      const action = planTurn(s);
+      applyAction(s, action);
       // While the game is still live, every applied action must advance the turn.
-      // (The single terminal move that ends the game is exempt.)
-      if (s.phase === "play") expect(s.turn).toBeGreaterThan(before);
+      // Exempt: the terminal move that ends the game, and takeFaceUp (a pre-play
+      // pickup of face-up cards into hand that doesn't consume the turn).
+      if (s.phase === "play" && action.type !== "takeFaceUp") expect(s.turn).toBeGreaterThan(before);
       i++;
     }
     expect(s.phase).toBe("over");
