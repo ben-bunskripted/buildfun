@@ -962,7 +962,12 @@ function layoutHand(host) {
   cards.forEach((c) => c.style.removeProperty("--card-rot"));
   if (n === 0) { host.style.setProperty("--hand-overlap", "4px"); return; }
 
-  const cardW = cards[0].offsetWidth || 70;
+  // Measure the real card + dock widths. offsetWidth ignores the fan transform
+  // (so it's the true card width); fall back to the computed --card-w, never a
+  // tiny guess — a wrong cardW here sizes the whole fan and bleeds off-screen.
+  const cardW = cards[0].offsetWidth
+    || parseFloat(getComputedStyle(host).getPropertyValue("--card-w"))
+    || 72;
   const dock = host.parentElement || host;
   const available = Math.max(0, (dock.clientWidth || window.innerWidth) - 16);
   // Never cover more than ~70% of a card, so its top-left corner always shows.
@@ -1021,6 +1026,7 @@ function layoutHand(host) {
     host.style.setProperty("--hand-overlap", `${overlap}px`);
     const startDeg = -edgeDeg;
     cards.forEach((c, i) => c.style.setProperty("--card-rot", `${(startDeg + stepDeg * i).toFixed(2)}deg`));
+    ensureHandFits(host, dock, cards, n, cardW);
     return;
   }
 
@@ -1033,6 +1039,29 @@ function layoutHand(host) {
   // off the viewport (fitOverlap clamps + floors so rounding can't widen the row).
   let overlap = minVisible - cardW;
   host.style.setProperty("--hand-overlap", `${fitOverlap(overlap, n, cardW, available)}px`);
+  ensureHandFits(host, dock, cards, n, cardW);
+}
+
+// Real-geometry safety net. The fan's per-card rotation makes the true rendered
+// width hard to predict, and a bad width measurement would size the whole hand
+// wrong — so after laying out, measure what actually rendered (getBoundingClientRect
+// reflects the transforms) and, if the hand still pokes past the dock, flatten the
+// tilt and tighten the overlap from the measured sizes so it definitely fits.
+function ensureHandFits(host, dock, cards, n, cardW) {
+  if (!dock || n < 2) return;
+  const dr = dock.getBoundingClientRect();
+  if (dr.width <= 0) return;                       // not laid out yet — a later render will fix it
+  const cs = getComputedStyle(dock);
+  const contentW = dr.width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  if (contentW <= 0) return;
+  let minL = Infinity, maxR = -Infinity;
+  for (const c of cards) { const r = c.getBoundingClientRect(); if (r.left < minL) minL = r.left; if (r.right > maxR) maxR = r.right; }
+  if (maxR - minL <= contentW) return;             // already fits, including the swing
+  // Flatten the fan (kills the corner swing) and re-fit the overlap to the real
+  // content width using the true (transform-free) card width.
+  const w = cards[0].offsetWidth || cardW;
+  cards.forEach((c) => c.style.setProperty("--card-rot", "0deg"));
+  host.style.setProperty("--hand-overlap", `${fitOverlap(w * 0.1 - w, n, w, contentW)}px`);
 }
 
 // Clamp a hand-overlap (a negative margin) so the laid-out row can never be wider
@@ -1283,7 +1312,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v22";
+const APP_BUILD = "v23";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
