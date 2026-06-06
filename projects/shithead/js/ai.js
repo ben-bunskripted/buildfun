@@ -81,6 +81,27 @@ export function planTurn(state) {
     if (dangerous && byRank.has("10")) {
       return playAction(p, zone, byRank.get("10").slice(0, 1));
     }
+    // 3) Pressure the next player into picking up. We know some of their cards
+    //    from piles they scooped (state.memory); playing above their known
+    //    highest tends to force a pickup. If they're about to go out, hit them
+    //    harder — a joker (full pickup) or a high card to set them right back.
+    const next = nextOpponent(state, p);
+    if (next) {
+      const close = totalCards(next) <= 4;          // a couple of cards from finishing
+      const knownMax = knownMaxValue(state, next.id);
+      if (close && byRank.has("JK")) {
+        return playAction(p, zone, byRank.get("JK").slice(0, 1));
+      }
+      const nonPowerAsc = ranks.filter((r) => !POWER.has(r)).sort((a, b) => value(a) - value(b));
+      // When they're close, lead high (≥ 9) to make them sweat; otherwise just
+      // clear their known holdings as cheaply as we can.
+      const floor = close ? Math.max(knownMax, 9) : (knownMax >= 3 && knownMax <= 8 ? knownMax : Infinity);
+      const above = nonPowerAsc.filter((r) => value(r) > floor);
+      if (above.length) {
+        const r = close ? above[above.length - 1] : above[0];
+        return playAction(p, zone, byRank.get(r));
+      }
+    }
   }
 
   // Prefer the lowest non-power rank; dump all duplicates of it.
@@ -99,6 +120,27 @@ export function planTurn(state) {
     if (byRank.has(r)) return playAction(p, zone, byRank.get(r).slice(0, 1));
   }
   return playAction(p, zone, byRank.get(ranks[0]).slice(0, 1));
+}
+
+// Total cards a player still holds across all zones — small means near the end.
+function totalCards(p) { return p.hand.length + p.faceUp.length + p.faceDown.length; }
+
+// The next active opponent in the current play direction (skips finished seats
+// and the player themself). Mirrors game.js's seat advance.
+function nextOpponent(state, p) {
+  const n = state.players.length;
+  const dir = state.direction === -1 ? -1 : 1;
+  let i = state.current, guard = 0;
+  do { i = (i + dir + n) % n; guard++; } while (guard < n * 2 && (state.players[i].finished || state.players[i].id === p.id));
+  const q = state.players[i];
+  return q && !q.finished && q.id !== p.id ? q : null;
+}
+
+// Highest card value a player is known to hold from piles they've scooped.
+function knownMaxValue(state, id) {
+  const known = state.memory && state.memory[id];
+  if (!known || !known.length) return 0;
+  return Math.max(...known.map((r) => value(r)));
 }
 
 function countTopSame(pile) {

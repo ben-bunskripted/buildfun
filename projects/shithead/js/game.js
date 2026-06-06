@@ -76,6 +76,10 @@ export function createState({ players, options = {}, shuffle } = {}) {
     started: false,
     turn: 0,
     stale: 0,
+    // Per-player card-counting memory the CPU uses: ranks each player is known
+    // to hold because they picked up a (publicly visible) pile. Pruned as they
+    // shed those cards. Public information — fair game for a card-counter.
+    memory: {},
     lastEvent: null,
     shitheadId: null,
     finishOrder: [],
@@ -131,6 +135,7 @@ function tickStale(state) {
   if (state.stale >= STALL_LIMIT && state.pile.length > 0) {
     state.burnedCount += state.pile.length;
     state.pile = [];
+    state.jokerAttack = false;   // the attacked pile is gone — clear the obligation
     state.stale = 0;
     state.lastEvent = { ...e, stalemateBurn: true };
   }
@@ -333,10 +338,29 @@ function doFaceDown(state, p, cardId) {
   checkGameOver(state);
 }
 
+// ---------- CPU pickup memory (public information) ----------
+// Track the ranks a player is known to hold after taking a pile, and forget
+// them as the player plays matching cards. Capped so it can't grow unbounded.
+const MEMORY_CAP = 18;
+function rememberPickup(state, id, pile) {
+  if (!state.memory) state.memory = {};
+  const known = (state.memory[id] || []).concat(pile.map((c) => c.rank));
+  state.memory[id] = known.slice(-MEMORY_CAP);
+}
+function forgetPlayed(state, id, cards) {
+  const known = state.memory && state.memory[id];
+  if (!known || !known.length) return;
+  for (const c of cards) {
+    const i = known.indexOf(c.rank);
+    if (i >= 0) known.splice(i, 1);
+  }
+}
+
 function commitPlay(state, p, zone, cards, wasBlind = false) {
   // Remove from the zone.
   const ids = new Set(cards.map((c) => c.id));
   p[zone] = p[zone].filter((c) => !ids.has(c.id));
+  forgetPlayed(state, p.id, cards);
   // Lay on the pile.
   state.pile.push(...cards);
 
@@ -402,10 +426,12 @@ function doPickup(state, { playerId }) {
   if (state.phase !== "play") return;
   const p = state.players[state.current];
   if (!p || p.id !== playerId || p.finished) return;
-  if (state.pile.length === 0) return;
+  if (state.pile.length === 0) { state.jokerAttack = false; return; } // nothing to take; drop any stale attack
 
   const count = state.pile.length;
   const fromJoker = state.jokerAttack;
+  // Remember the (public) ranks this player just scooped into hand.
+  rememberPickup(state, p.id, state.pile);
   p.hand.push(...state.pile);
   p.hand.sort(compareForHand);
   state.pile = [];

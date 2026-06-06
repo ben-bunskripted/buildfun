@@ -136,8 +136,8 @@ function wireSeg(sel, attr, onPick) {
 
 // ---------------------------------------------------------------- start screen
 function wireStart() {
-  $$(".mode-tab").forEach((t) => t.addEventListener("click", () => {
-    $$(".mode-tab").forEach((x) => x.classList.remove("active"));
+  $$(".mode-tile").forEach((t) => t.addEventListener("click", () => {
+    $$(".mode-tile").forEach((x) => x.classList.remove("active"));
     t.classList.add("active");
     mode = t.dataset.mode;
     $("#setup-offline").hidden = mode === "online";
@@ -164,6 +164,12 @@ function wireStart() {
   $("#tour-btn").addEventListener("click", startTutorial);
   $("#tour-dismiss").addEventListener("click", () => { prefs.tutorialDone = true; savePrefs(); renderTourOffer(); });
   $("#howto-tour").addEventListener("click", startTutorial);
+  // Footer control mirrors Benny: "Dismiss tutorial" while the offer shows,
+  // "Replay tutorial" once it's been hidden — so the tour is always reachable.
+  $("#tutorial-foot").addEventListener("click", () => {
+    if (prefs.tutorialDone) startTutorial();
+    else { prefs.tutorialDone = true; savePrefs(); renderTourOffer(); }
+  });
 
   // Saved-games section: per-row Resume / Discard.
   $("#saved-list").addEventListener("click", (e) => {
@@ -742,14 +748,37 @@ function layoutHand(host) {
   const minVisible = Math.max(18, Math.round(cardW * 0.30));
 
   if (prefs.handFanned !== false) {
-    const stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
-    const edgeDeg = stepDeg * (n - 1) / 2;
+    // Each card fans around a pivot 240% below it (transform-origin in CSS), so
+    // the edge cards' top corners swing well past their own box. Account for
+    // that swing when fitting the row, or the rotated rank corners of the end
+    // cards clip off the dock edge (Benny's mechanic).
+    const cardH = cards[0].offsetHeight || (cardW * 1.553);
+    const pivotY = 2.4 * cardH;
+    const swingFor = (deg) => {
+      const r = (deg * Math.PI) / 180;
+      return (cardW / 2) * (1 - Math.cos(r)) + pivotY * Math.sin(r);
+    };
+    let stepDeg = n > 1 ? Math.min(4, 22 / (n - 1)) : 0;
+    let edgeDeg = stepDeg * (n - 1) / 2;
+    const minStep = Math.max(1, Math.round(cardW * 0.10));
     let overlap = -Math.round(cardW * 0.45);             // show ~55% of each card
-    if (n > 1) {
+    if (n > 1 && available > 0) {
+      const budget = Math.max(0, available - 2 * swingFor(edgeDeg));
       const fannedWidth = cardW + (n - 1) * (cardW + overlap);
-      if (fannedWidth > available) {
-        overlap = (available - cardW) / (n - 1) - cardW; // tighten to fit
-        if (cardW + overlap < minVisible) overlap = minVisible - cardW;
+      if (fannedWidth > budget) {
+        const step = (budget - cardW) / (n - 1);
+        if (step >= minStep) {
+          overlap = step - cardW;
+        } else {
+          // Min overlap still overflows — pull the tilt in so the corners stay
+          // on-screen. Flatter fan, but no clipped ranks.
+          overlap = minStep - cardW;
+          const tightWidth = cardW + (n - 1) * (cardW + overlap);
+          const swingBudget = Math.max(0, (available - tightWidth) / 2);
+          if (swingBudget <= 0 || pivotY <= 0) edgeDeg = 0;
+          else edgeDeg = Math.min(edgeDeg, (Math.asin(Math.min(1, swingBudget / pivotY)) * 180) / Math.PI);
+          stepDeg = n > 1 ? (2 * edgeDeg) / (n - 1) : 0;
+        }
       }
     }
     host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
@@ -931,7 +960,7 @@ function renderSaved() {
 // mode (and its setup tab) to match, then load its snapshot.
 function resumeMode(m) {
   mode = m;
-  $$(".mode-tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
+  $$(".mode-tile").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
   const off = $("#setup-offline"), on = $("#setup-online"), diff = $("#field-difficulty");
   if (off) off.hidden = mode === "online";
   if (on) on.hidden = mode !== "online";
@@ -1003,7 +1032,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v9";
+const APP_BUILD = "v10";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1269,10 +1298,13 @@ function skipTutorial() {
   showScreen("screen-start");
 }
 
-// First-run "take the tour" offer on the home screen.
+// First-run "take the tour" offer on the home screen + the footer control,
+// which toggles label/role depending on whether the offer has been dismissed.
 function renderTourOffer() {
   const offer = $("#tour-offer");
   if (offer) offer.hidden = !!prefs.tutorialDone;
+  const foot = $("#tutorial-foot");
+  if (foot) foot.textContent = prefs.tutorialDone ? "Replay tutorial" : "Dismiss tutorial";
 }
 
 // ---------------------------------------------------------------- modals
