@@ -29,6 +29,8 @@ const ui = {
   handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
   pendingHandRender: false, // a hand rebuild deferred because a drag is live
   toastedAch: new Set(),    // achievements already toasted this match
+  tutorialActive: false,    // a guided tutorial is running (pauses the CPUs)
+  ephemeral: false,         // practice game — don't write it to a save slot
   cpuTimer: null,
   busy: false,      // an action animation is in flight
   setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
@@ -45,6 +47,7 @@ function boot() {
   wireOver();
   renderHowto();
   renderSaved();
+  renderTourOffer();
   renderVersionStamp();
   setupCardZoom();
   showScreen("screen-start");
@@ -158,6 +161,9 @@ function wireStart() {
   $("#howto-link").addEventListener("click", () => openModal("modal-howto"));
   $("#settings-link").addEventListener("click", () => openModal("modal-settings"));
   $("#stats-btn").addEventListener("click", openStats);
+  $("#tour-btn").addEventListener("click", startTutorial);
+  $("#tour-dismiss").addEventListener("click", () => { prefs.tutorialDone = true; savePrefs(); renderTourOffer(); });
+  $("#howto-tour").addEventListener("click", startTutorial);
 
   // Saved-games section: per-row Resume / Discard.
   $("#saved-list").addEventListener("click", (e) => {
@@ -245,6 +251,7 @@ function startNewGame() {
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
   ui.toastedAch = new Set();
+  ui.ephemeral = false;
   ui.summaries = {};
   for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
@@ -361,6 +368,7 @@ function scheduleTurn() {
 
   if (cur.isCPU) {
     renderPlay();
+    if (ui.tutorialActive) return;     // hold the bots while the coach is talking
     const delay = prefs.animate !== false ? 520 + Math.floor(Math.random() * 380) : 30;
     ui.cpuTimer = setTimeout(() => doAction(planTurn(state)), delay);
     return;
@@ -891,7 +899,7 @@ function wireOver() {
 
 // ---------------------------------------------------------------- persistence / resume
 function persist() {
-  if (!state) return;
+  if (!state || ui.ephemeral) return;   // practice/tutorial games aren't saved
   storage.save({ mode, state: serialize(state), ui: { humanId: ui.humanId, humans: ui.humans, viewerId: ui.viewerId, summaries: ui.summaries } });
 }
 
@@ -942,6 +950,7 @@ function onResume() {
   ui.selected = [];
   ui.handOrders = {};
   ui.toastedAch = new Set();
+  ui.ephemeral = false;
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
@@ -994,7 +1003,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v8";
+const APP_BUILD = "v9";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1141,6 +1150,129 @@ function renderHowto() {
       <li><b>Four of a kind</b> on the pile burns it — same as a 10.</li>
     </ul>
     <p><b>Endgame:</b> once your hand is empty, play your 3 face-up cards. Then play your 3 face-down cards <b>blind</b> — flip one; if it beats the pile it stays, otherwise you take the pile.</p>`;
+}
+
+// ---------------------------------------------------------------- tutorial
+// A guided coach overlay running on a throwaway practice game (vs one easy
+// bot). The bots are paused while the coach talks; each step spotlights a real
+// UI element with a short explanation. Nothing is scripted — when it ends, the
+// practice game is yours to play.
+const TUTORIAL_STEPS = [
+  { target: null, title: "Welcome to Sh!thead!", body: "The goal: be the first to get rid of all your cards. Whoever's left holding cards is the Sh!thead." },
+  { target: "#you-hand", title: "Your hand", body: "These are your cards. On your turn, play a card equal to or higher than the top of the pile — or several of the same number at once." },
+  { target: "#discard-zone", title: "The pile", body: "Play onto the pile here: tap a card then Play, or just drag a card onto the pile. The next player has to beat your top card." },
+  { target: "#deck-stack", title: "Draw pile", body: "After playing from your hand you draw back up to three cards — while the deck lasts. So your hand stays at three until it runs out." },
+  { target: "#pickup-btn", title: "Stuck?", body: "Can't (or don't want to) play? Pick up the whole pile into your hand — then it's the next player's go." },
+  { target: null, title: "Power cards", body: "Look out for power cards: 2 resets the pile, 10 burns it, 7 forces a low play, 8 reverses the order, and a Joker makes the next player scoop everything. Toggle them in House rules." },
+  { target: "#you-facedown", title: "The endgame", body: "When your hand is empty, play your three face-up cards. Then the three face-down cards are played blind — flip one and hope it beats the pile!" },
+  { target: null, title: "You're ready!", body: "That's the gist. This is a practice game against an easy bot — have a go. Good luck, and don't be the Sh!thead!" },
+];
+
+let coachEl = null, coachIdx = 0;
+
+function startTutorial() {
+  closeModals();
+  hideBanner();
+  ui.tutorialActive = true;
+  ui.ephemeral = true;                 // a throwaway game — never saved
+  mode = "cpu";
+  const players = [
+    { id: "you", name: prefs.name || "You", isCPU: false, difficulty: "normal" },
+    { id: "cpu1", name: "Benny", isCPU: true, difficulty: "easy" },
+  ];
+  const options = {
+    swapPhase: false, jokers: false, sevenPower: false, eightMode: "reverse",
+    twoPower: true, tenPower: true, fourKindAcrossTurns: true, replayOnBurn: true,
+  };
+  state = createState({ players, options });
+  state.current = 0;                   // make it the human's turn so the controls show
+  ui.humans = ["you"]; ui.humanId = "you";
+  ui.handOrders = {}; ui.toastedAch = new Set();
+  ui.summaries = { you: { ...emptySummary(), difficulty: "easy", total: 2 } };
+  enterPlay();                         // CPUs are gated by ui.tutorialActive
+  coachStep(0);
+}
+
+function buildCoach() {
+  coachEl = document.createElement("div");
+  coachEl.id = "coach";
+  coachEl.innerHTML =
+    `<div class="coach-block"></div>` +
+    `<div class="coach-spot"></div>` +
+    `<div class="coach-balloon"><div class="coach-step"></div>` +
+    `<div class="coach-title"></div><div class="coach-body"></div>` +
+    `<div class="coach-actions"><button class="link coach-skip">Skip tour</button>` +
+    `<button class="btn primary coach-next">Next</button></div></div>`;
+  document.body.appendChild(coachEl);
+  coachEl.querySelector(".coach-next").addEventListener("click", () => {
+    if (coachIdx >= TUTORIAL_STEPS.length - 1) endTutorial();
+    else coachStep(coachIdx + 1);
+  });
+  coachEl.querySelector(".coach-skip").addEventListener("click", skipTutorial);
+}
+
+function coachStep(i) {
+  coachIdx = i;
+  if (!coachEl) buildCoach();
+  const step = TUTORIAL_STEPS[i];
+  const last = i === TUTORIAL_STEPS.length - 1;
+  const spot = coachEl.querySelector(".coach-spot");
+  const balloon = coachEl.querySelector(".coach-balloon");
+  coachEl.querySelector(".coach-step").textContent = `Step ${i + 1} of ${TUTORIAL_STEPS.length}`;
+  coachEl.querySelector(".coach-title").textContent = step.title;
+  coachEl.querySelector(".coach-body").textContent = step.body;
+  coachEl.querySelector(".coach-next").textContent = last ? "Let's play!" : "Next";
+
+  const tgt = step.target ? $(step.target) : null;
+  const r = tgt && tgt.getBoundingClientRect ? tgt.getBoundingClientRect() : null;
+  if (r && r.width > 0 && r.height > 0) {
+    const pad = 8;
+    spot.style.display = "block";
+    spot.style.left = `${r.left - pad}px`;
+    spot.style.top = `${r.top - pad}px`;
+    spot.style.width = `${r.width + pad * 2}px`;
+    spot.style.height = `${r.height + pad * 2}px`;
+    balloon.classList.remove("vcenter");
+    if (r.top < window.innerHeight * 0.5) {
+      balloon.style.top = `${Math.min(r.bottom + 14, window.innerHeight - 200)}px`;
+      balloon.style.bottom = "auto";
+    } else {
+      balloon.style.bottom = `${window.innerHeight - r.top + 14}px`;
+      balloon.style.top = "auto";
+    }
+  } else {
+    spot.style.display = "none";
+    balloon.classList.add("vcenter");
+    balloon.style.top = ""; balloon.style.bottom = "";
+  }
+}
+
+function removeCoach() { if (coachEl) { coachEl.remove(); coachEl = null; } }
+
+function endTutorial() {
+  ui.tutorialActive = false;
+  prefs.tutorialDone = true; savePrefs();
+  removeCoach();
+  renderTourOffer();
+  if (state && state.phase === "play") scheduleTurn();   // hand control back / wake the bot
+}
+
+function skipTutorial() {
+  ui.tutorialActive = false;
+  ui.ephemeral = false;
+  prefs.tutorialDone = true; savePrefs();
+  removeCoach();
+  clearTimeout(ui.cpuTimer);
+  state = null;
+  renderTourOffer();
+  renderSaved();
+  showScreen("screen-start");
+}
+
+// First-run "take the tour" offer on the home screen.
+function renderTourOffer() {
+  const offer = $("#tour-offer");
+  if (offer) offer.hidden = !!prefs.tutorialDone;
 }
 
 // ---------------------------------------------------------------- modals
