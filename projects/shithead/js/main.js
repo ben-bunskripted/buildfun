@@ -131,14 +131,14 @@ function setupCardZoom() {
 
 function applyPrefs() {
   setCardStyle(prefs.cardStyle || "modern");
-  document.documentElement.dataset.cardSize = prefs.cardSize || "m";
+  document.documentElement.dataset.cardSize = prefs.cardSize || "xl";
   if (prefs.animate === undefined) prefs.animate = true;
   if (prefs.selectMatching === undefined) prefs.selectMatching = true;
   if (prefs.handFanned === undefined) prefs.handFanned = true;
   // reflect into settings controls
   segSelect("#seg-cardstyle", "cs", prefs.cardStyle || "modern");
-  segSelect("#seg-cardsize", "sz", prefs.cardSize || "m");
-  segSelect("#seg-cardsize-menu", "sz", prefs.cardSize || "m");
+  segSelect("#seg-cardsize", "sz", prefs.cardSize || "xl");
+  segSelect("#seg-cardsize-menu", "sz", prefs.cardSize || "xl");
   const anim = $("#opt-animate"); if (anim) anim.checked = prefs.animate !== false;
   const match = $("#match-toggle-input"); if (match) match.checked = prefs.selectMatching !== false;
   const fan = $("#opt-fan"); if (fan) fan.checked = prefs.handFanned !== false;
@@ -1186,7 +1186,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v18";
+const APP_BUILD = "v19";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");

@@ -43,6 +43,7 @@ describe("CPU pickup memory + endgame pressure", () => {
   it("remembers the ranks a player scoops, and forgets them as they're played", () => {
     const s = playGame();
     const a = s.players[0];
+    a.hand = [];                                   // clear the dealt hand so injected ids can't collide
     s.pile = [card("9", "S"), card("5", "H")];
     applyAction(s, { type: "pickup", playerId: "a" });
     expect(s.memory.a).toEqual(expect.arrayContaining(["9", "5"]));
