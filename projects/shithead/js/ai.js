@@ -40,6 +40,12 @@ export function planTurn(state) {
     return { type: "play", playerId: p.id, source: "faceDown", cardIds: [card.id] };
   }
 
+  // Hand empty with face-up cards left: scoop them into hand (up to 3), then
+  // play from hand on the next turn like everyone else.
+  if (zone === "faceUp") {
+    return { type: "takeFaceUp", playerId: p.id, cardIds: p.faceUp.slice(0, 3).map((c) => c.id) };
+  }
+
   const cards = p[zone];
   const opts = state.options;
   const req = requirement(state.pile, opts);

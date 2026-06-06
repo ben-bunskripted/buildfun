@@ -230,15 +230,17 @@ body {
 .mini-stack { position: relative; }
 .mini-stack .card { position: absolute; inset: 0; width: 100%; height: 100%; }
 .card.on-top { position: absolute; left: 0; top: 0; }
-/* Lift the face-up card so the face-down card beneath peeks out the bottom,
-   making it obvious there's a hidden card underneath each table slot. */
-.you-table .you-stack .card.on-top { transform: translateY(-14%); }
+/* Endgame: face-up cards you can tap to pull into your hand. */
+.card.takeable { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: calc(var(--card-w) * .11); animation: takeablePulse 1.5s ease-in-out infinite; }
+@keyframes takeablePulse { 0%, 100% { outline-color: var(--gold); } 50% { outline-color: color-mix(in srgb, var(--gold) 35%, transparent); } }
+
+/* Lift the opponent face-up card so the face-down card beneath peeks out. */
 .opp-table .mini-stack .card.on-top { transform: translateY(-16%); }
 
 /* ---------------- center table ---------------- */
 /* Top padding reserves room for the (absolutely-placed) top seat so the
    centred pile never grows up into it at L/XL. */
-.center-table { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: calc(var(--card-w) * .45 + 30px) 6px 6px; min-height: 300px; }
+.center-table { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: calc(var(--base-cw, var(--card-w)) * .1 + 80px) 6px 6px; min-height: 300px; }
 .pile-zone { display: flex; align-items: center; gap: 16px; }
 .deck-stack { position: relative; }
 .deck-stack .count, .pile-count, .burned-zone .count { position: absolute; bottom: -6px; right: -6px; background: var(--bg-3); color: var(--ink); border-radius: 999px; padding: 2px 7px; font-size: .8rem; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
@@ -290,8 +292,15 @@ body {
 
 /* ---------------- you area ---------------- */
 .you-area { padding: 6px 8px 4px; }
-.you-table { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; }
-.you-stack { width: var(--card-w); height: var(--card-h); }
+/* Your table cards: two separate rows (face-up over face-down) sitting just
+   above the deck, Benny-style. Sized down from the play card so both rows +
+   the pile fit comfortably; capture the tier --card-w first so the override
+   below isn't a self-reference. */
+.center-table { --base-cw: var(--card-w); }
+#you-table { --card-w: calc(var(--base-cw) * .58); display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0 0 4px; }
+#you-table .card-row { gap: 4px; }
+.you-table-label { font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
+.hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 /* Hand overlap is driven by --hand-overlap (set by layoutHand); the fan adds a
    per-card tilt around a pivot below the row + top padding so tilted corners
