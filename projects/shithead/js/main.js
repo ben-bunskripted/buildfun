@@ -1009,7 +1009,16 @@ function layoutHand(host) {
         }
       }
     }
-    host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
+    overlap = fitOverlap(overlap, n, cardW, available);
+    // Trim any residual tilt so the swung end corners stay within the space too —
+    // the row body fits, but a leftover lean can still poke a corner past the edge.
+    if (n > 1 && available > 0 && edgeDeg > 0) {
+      const rowW = cardW + (n - 1) * (cardW + overlap);
+      while (edgeDeg > 0 && rowW + 2 * swingFor(edgeDeg) > available) edgeDeg -= 0.25;
+      if (edgeDeg < 0) edgeDeg = 0;
+      stepDeg = (2 * edgeDeg) / (n - 1);
+    }
+    host.style.setProperty("--hand-overlap", `${overlap}px`);
     const startDeg = -edgeDeg;
     cards.forEach((c, i) => c.style.setProperty("--card-rot", `${(startDeg + stepDeg * i).toFixed(2)}deg`));
     return;
@@ -1019,9 +1028,21 @@ function layoutHand(host) {
   const gap = 4;
   const naturalWidth = n * cardW + (n - 1) * gap;
   if (n === 1 || naturalWidth <= available) { host.style.setProperty("--hand-overlap", `${gap}px`); return; }
-  let overlap = (available - cardW) / (n - 1) - cardW;
-  if (cardW + overlap < minVisible) overlap = minVisible - cardW;
-  host.style.setProperty("--hand-overlap", `${Math.round(overlap)}px`);
+  // Keep a readable strip showing (minVisible) only while that still fits; once the
+  // hand is big enough that it wouldn't, pack tighter so the end cards never bleed
+  // off the viewport (fitOverlap clamps + floors so rounding can't widen the row).
+  let overlap = minVisible - cardW;
+  host.style.setProperty("--hand-overlap", `${fitOverlap(overlap, n, cardW, available)}px`);
+}
+
+// Clamp a hand-overlap (a negative margin) so the laid-out row can never be wider
+// than the space available, then floor it — floor nudges toward MORE overlap, so
+// integer rounding can't round the row back up over the edge (which bled the
+// leftmost fanned card off-screen on big hands).
+function fitOverlap(overlap, n, cardW, available) {
+  if (n <= 1 || available <= 0) return Math.round(overlap);
+  const maxOverlap = (available - cardW) / (n - 1) - cardW;  // least overlap that still fits
+  return Math.floor(Math.min(overlap, maxOverlap));
 }
 
 // ---------------------------------------------------------------- hand drag/drop
@@ -1262,7 +1283,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v21";
+const APP_BUILD = "v22";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
