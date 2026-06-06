@@ -245,6 +245,8 @@ body {
 .player-row-table { position: relative; display: flex; align-items: flex-end; gap: 6px; min-height: calc(var(--card-h) * 1.2); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 2px; }
 .player-row-table::-webkit-scrollbar { display: none; }
 .player-row-table .mini-stack { flex: 0 0 auto; width: var(--card-w); height: var(--card-h); }
+/* an emptied slot holds its column as an invisible spacer so cards don't slide left */
+.player-row-table .mini-stack.slot-empty { pointer-events: none; }
 .player-row-table > .card { flex: 0 0 auto; }
 .player-row-table .mini-stack .card.on-top { transform: translateY(-16%); }
 .player-row-table.ov-right { -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent 100%); mask-image: linear-gradient(90deg, #000 86%, transparent 100%); }

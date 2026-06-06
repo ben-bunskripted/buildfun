@@ -114,6 +114,12 @@ describe("jokers", () => {
     expect(R.isJokerDefence("4")).toBe(false);
     expect(R.isJoker("JK")).toBe(true);
   });
+  it("a 3 or another joker can answer a joker attack", () => {
+    expect(R.isJokerAnswer("3", opts({ jokers: true }))).toBe(true);
+    expect(R.isJokerAnswer("JK", opts({ jokers: true }))).toBe(true);
+    expect(R.isJokerAnswer("JK", opts({ jokers: false }))).toBe(false);
+    expect(R.isJokerAnswer("9", opts({ jokers: true }))).toBe(false);
+  });
 });
 
 describe("playableRanks / hasLegalPlay", () => {

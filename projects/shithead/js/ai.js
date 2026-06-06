@@ -5,7 +5,7 @@
 //   hard   — normal + completes 4-of-a-kinds, burns fat/dangerous piles, dumps
 //            duplicates, and is stingier with its power cards.
 
-import { value, requirement, canPlayRank, isJokerDefence } from "./rules.js";
+import { value, requirement, canPlayRank, isJokerAnswer } from "./rules.js";
 import { currentZone } from "./game.js";
 import { pickRandom, randomInt } from "./rng.js";
 
@@ -24,13 +24,16 @@ export function planTurn(state) {
   const zone = currentZone(p);
   if (!zone) return { type: "pickup", playerId: p.id }; // shouldn't happen
 
-  // Under a joker attack: answer with a 3 if one is to hand, otherwise eat the
-  // pile. Blind face-down cards can't deflect, so those players must pick up.
+  // Under a joker attack: answer with a 3 (or another joker) if one is to hand,
+  // otherwise eat the pile. Down to blind face-down cards, flip one — it deflects
+  // if it lands a 3/joker, and is scooped up with the pile otherwise.
   if (state.jokerAttack) {
-    if (zone !== "faceDown") {
-      const three = p[zone].find((c) => isJokerDefence(c.rank));
-      if (three) return playAction(p, zone, [three]);
+    if (zone === "faceDown") {
+      const card = pickRandom(p.faceDown);
+      return { type: "play", playerId: p.id, source: "faceDown", cardIds: [card.id] };
     }
+    const answer = p[zone].find((c) => isJokerAnswer(c.rank, state.options));
+    if (answer) return playAction(p, zone, [answer]);
     return { type: "pickup", playerId: p.id };
   }
 

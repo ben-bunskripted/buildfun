@@ -41,6 +41,7 @@ const ui = {
   summaries: {},    // per-human achievement tally
   handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
   faceUpSlots: {},  // per-player stable slot order for face-up cards, so taking one leaves a gap
+  faceDownSlots: {}, // per-player stable slot order for face-down cards, so playing one leaves a gap
   pendingHandRender: false, // a hand rebuild deferred because a drag is live
   toastedAch: new Set(),    // achievements already toasted this match
   tutorialActive: false,    // a guided tutorial is running (pauses the CPUs)
@@ -294,15 +295,32 @@ function onDeal() {
 function startNewGame() {
   const { players, options } = collectSetup();
   const { dealerId, isRandom } = resolveDealer(players);
+  launchGame(players, options, { dealerId, isRandom });
+}
+
+// Restart / rematch: deal a fresh game with the SAME players and the SAME house
+// rules as the game in progress (collectSetup would re-read the start screen,
+// which may have drifted back to defaults — especially after a Resume). Falls
+// back to a fresh setup if there's no live game to mirror.
+function restartGame() {
+  if (!state) return startNewGame();
+  const players = state.players.map((p) => ({ id: p.id, name: p.name, isCPU: p.isCPU, difficulty: p.difficulty }));
+  launchGame(players, { ...state.options }, { dealerId: null, isRandom: false });
+}
+
+// Deal and enter a match for the given roster + options.
+function launchGame(players, options, { dealerId = null, isRandom = false } = {}) {
   state = createState({ players, options, forcedStarter: dealerId });
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
   ui.faceUpSlots = {};
+  ui.faceDownSlots = {};
   ui.toastedAch = new Set();
   ui.ephemeral = false;
   ui.summaries = {};
-  for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
+  const difficulty = (players.find((p) => p.isCPU) || {}).difficulty || ui.setup.difficulty;
+  for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
   for (const p of state.players) {
     if (p.isCPU) {
@@ -467,7 +485,7 @@ function wirePlay() {
   $("#menu-fan").addEventListener("click", () => setFan(prefs.handFanned === false));
   $("#menu-howto").addEventListener("click", () => { closeModals(); openModal("modal-howto"); });
   $("#menu-settings").addEventListener("click", () => { closeModals(); openModal("modal-settings"); });
-  $("#menu-restart").addEventListener("click", () => { closeModals(); showConfirm("Restart game?", "Deal a fresh game with the same players?", () => startNewGame()); });
+  $("#menu-restart").addEventListener("click", () => { closeModals(); showConfirm("Restart game?", "Deal a fresh game with the same players and house rules?", () => restartGame()); });
   $("#menu-quit").addEventListener("click", () => { closeModals(); exitToStart(); });
   setupHandDrag();
 }
@@ -537,7 +555,7 @@ function animateEvent(e) {
       if (top) { top.classList.remove("drop-in"); void top.offsetWidth; top.classList.add("drop-in"); }
     }
     if (e.joker) floatLabel("🃏 Joker!");
-    else if (e.deflect) floatLabel("3 — deflected!");
+    else if (e.deflect) floatLabel(e.rank === "JK" ? "🃏 — deflected!" : "3 — deflected!");
     else if (e.rank === "8" && state.options.eightMode === "reverse" && !e.burned) floatLabel("Reverse ↺");
     else if (e.rank === "2" && state.options.twoPower && !e.burned) floatLabel("Reset");
   } else if (e.type === "pickup" || e.type === "blindFail") {
@@ -639,7 +657,7 @@ function renderPlay() {
   // turn pill
   const pill = $("#turn-pill");
   if (state.phase === "over") pill.textContent = "Game over";
-  else if (myTurn && summ && summ.underAttack) pill.textContent = "🃏 Joker! Play a 3 or pick up";
+  else if (myTurn && summ && summ.underAttack) pill.textContent = summ.blind ? "🃏 Joker! Flip a face-down card" : "🃏 Joker! Play a 3 or pick up";
   else if (myTurn && summ && summ.canTakeFaceUp && zone === "faceUp") pill.textContent = "Take your face-up cards";
   else if (myTurn) pill.textContent = zone === "faceDown" ? "Flip a face-down card" : "Your turn";
   else pill.textContent = `${cur.name} is playing…`;
@@ -687,7 +705,7 @@ function renderPlayerRows(viewer, myTurn, zone, summ) {
     row.appendChild(head);
 
     row.appendChild(renderPlayerTable(p, {
-      blindActive: isViewer && myTurn && zone === "faceDown" && !(summ && summ.underAttack),
+      blindActive: isViewer && myTurn && !!(summ && summ.blind),
       takeActive: isViewer && myTurn && summ && summ.canTakeFaceUp,
       deflectActive: isViewer && myTurn && summ && summ.underAttack && zone === "faceUp",
       summ,
@@ -708,18 +726,28 @@ function renderPlayerTable(p, o = {}) {
     if (o.takeActive) { up.classList.add("takeable"); up.addEventListener("click", () => onTakeFaceUp(id)); }
     else if (o.deflectActive) { up.classList.add("selectable"); bindSelect(up, id, "faceUp", o.summ); if (ui.selected.includes(id)) up.classList.add("selected"); }
   };
-  // Stable slot order: face-up cards keep their original column, so taking one
-  // into hand leaves a gap (the face-down back) rather than shuffling the rest left.
-  const slots = stableFaceUpSlots(p);
+  // Stable slot order for BOTH rows: cards keep their original column, so playing
+  // a face-down (or taking a face-up into hand) leaves a gap rather than shuffling
+  // everything to the left. Each slot stacks its face-up over its face-down.
+  const upSlots = stableFaceUpSlots(p);
+  const downSlots = stableFaceDownSlots(p);
   const faceUpById = new Map(p.faceUp.map((c) => [c.id, c]));
-  const slotCount = Math.max(p.faceDown.length, slots.length);
+  const faceDownById = new Map(p.faceDown.map((c) => [c.id, c]));
+  const slotCount = Math.max(downSlots.length, upSlots.length);
+  // Find the last slot that still holds anything, so trailing emptied slots don't
+  // leave dangling gaps on the right (interior gaps are preserved).
+  let lastFilled = -1;
   for (let i = 0; i < slotCount; i++) {
-    const upCard = faceUpById.get(slots[i]);   // the card originally in this slot, if still here
-    if (i < p.faceDown.length) {
+    if (faceDownById.get(downSlots[i]) || faceUpById.get(upSlots[i])) lastFilled = i;
+  }
+  for (let i = 0; i <= lastFilled; i++) {
+    const downCard = faceDownById.get(downSlots[i]);
+    const upCard = faceUpById.get(upSlots[i]);
+    if (downCard) {
       const stack = document.createElement("div");
       stack.className = "mini-stack";
       const back = renderCardBack({ className: o.blindActive ? "selectable blind" : "" });
-      if (o.blindActive) back.addEventListener("click", () => onBlindFlip(p.faceDown[i].id));
+      if (o.blindActive) back.addEventListener("click", () => onBlindFlip(downCard.id));
       stack.appendChild(back);
       if (upCard) {
         const up = renderCard(upCard, { className: "on-top" });
@@ -732,6 +760,11 @@ function renderPlayerTable(p, o = {}) {
       const up = renderCard(upCard, {});
       wireUp(up, upCard.id);
       host.appendChild(up);
+    } else {
+      // an emptied interior slot — hold the column with a blank spacer.
+      const gap = document.createElement("div");
+      gap.className = "mini-stack slot-empty";
+      host.appendChild(gap);
     }
   }
   if (!p.faceDown.length && !p.faceUp.length) {
@@ -746,11 +779,21 @@ function renderPlayerTable(p, o = {}) {
 // taken (they only ever leave), so columns don't reflow. Re-seeds if a new card
 // id appears (e.g. a fresh deal after the map was cleared).
 function stableFaceUpSlots(p) {
-  const ids = p.faceUp.map((c) => c.id);
-  let order = ui.faceUpSlots[p.id];
+  return stableSlots(p, "faceUp", ui.faceUpSlots);
+}
+
+// Same stable-slot treatment for the face-down row, so flipping a blind card
+// leaves its column empty instead of sliding the others left.
+function stableFaceDownSlots(p) {
+  return stableSlots(p, "faceDown", ui.faceDownSlots);
+}
+
+function stableSlots(p, zone, store) {
+  const ids = p[zone].map((c) => c.id);
+  let order = store[p.id];
   if (!order || ids.some((id) => !order.includes(id))) {
     order = ids.slice();
-    ui.faceUpSlots[p.id] = order;
+    store[p.id] = order;
   }
   return order;
 }
@@ -790,9 +833,11 @@ function renderCenter(myTurn, summ) {
   const hint = $("#req-hint");
   if (!myTurn) { hint.textContent = ""; return; }
   if (summ && summ.underAttack) {
-    hint.textContent = summ.mustPickup
-      ? "Joker played — no 3 to deflect, pick up the pile"
-      : "Joker played — play a 3 to pass it on, or pick up the pile";
+    hint.textContent = summ.blind
+      ? "Joker played — flip a face-down card; a 3 (or Joker) deflects, else you take the pile"
+      : summ.mustPickup
+        ? "Joker played — no 3 to deflect, pick up the pile"
+        : "Joker played — play a 3 (or another Joker) to pass it on, or pick up the pile";
     return;
   }
   const req = requirement(state.pile, state.options);
@@ -946,11 +991,18 @@ function layoutHand(host) {
         if (step >= minStep) {
           overlap = step - cardW;
         } else {
-          // Min overlap still overflows — pull the tilt in so the corners stay
-          // on-screen. Flatter fan, but no clipped ranks.
+          // Min overlap still overflows. Flatten the fan so nothing swings past
+          // the row; then, if the row ITSELF is still wider than the screen,
+          // tighten the overlap further so it fits — a heavier overlap is better
+          // than the end cards bleeding off the viewport edge (centred + overflow
+          // would otherwise clip the unreachable left card).
           overlap = minStep - cardW;
-          const tightWidth = cardW + (n - 1) * (cardW + overlap);
-          const swingBudget = Math.max(0, (available - tightWidth) / 2);
+          let rowWidth = cardW + (n - 1) * (cardW + overlap);
+          if (rowWidth > available) {
+            overlap = (available - cardW) / (n - 1) - cardW;
+            rowWidth = available;
+          }
+          const swingBudget = Math.max(0, (available - rowWidth) / 2);
           if (swingBudget <= 0 || pivotY <= 0) edgeDeg = 0;
           else edgeDeg = Math.min(edgeDeg, (Math.asin(Math.min(1, swingBudget / pivotY)) * 180) / Math.PI);
           stepDeg = n > 1 ? (2 * edgeDeg) / (n - 1) : 0;
@@ -1098,7 +1150,7 @@ function endMatch() {
 function medal(n) { return n === 1 ? "🥇" : n === 2 ? "🥈" : n === 3 ? "🥉" : "#" + n; }
 
 function wireOver() {
-  $("#rematch-btn").addEventListener("click", () => startNewGame());
+  $("#rematch-btn").addEventListener("click", () => restartGame());
   $("#over-home-btn").addEventListener("click", () => { state = null; renderSaved(); showScreen("screen-start"); });
 }
 
@@ -1155,6 +1207,7 @@ function onResume() {
   ui.selected = [];
   ui.handOrders = {};
   ui.faceUpSlots = {};
+  ui.faceDownSlots = {};
   ui.toastedAch = new Set();
   ui.ephemeral = false;
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
@@ -1209,7 +1262,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v20";
+const APP_BUILD = "v21";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1383,8 +1436,8 @@ function renderHowto() {
       <li><b>2</b> — Reset. Play on anything; the next player can play anything.</li>
       <li><b>10</b> — Burn. Play on anything; the pile is removed and you go again.</li>
       <li><b>7</b> — The next player must play a 7 or lower.</li>
-      <li><b>8</b> — <b>Reverse</b> the direction of play (with two players it bounces back, so you go again), <i>or</i> Invisible (see through to the card below), <i>or</i> Skip the next player — depending on house rules.</li>
-      <li><b>Joker</b> — the next player must pick up the <i>whole pile</i>… unless they play a <b>3</b>, which passes that fate to the player after them, and so on until someone without a 3 scoops it all.</li>
+      <li><b>8</b> — <b>Reverse</b> the direction of play (with two players it bounces back, so you go again), <i>or</i> Invisible (see through to the card below), <i>or</i> <b>Skip</b> the next player — depending on house rules.</li>
+      <li><b>Joker</b> — the next player must pick up the <i>whole pile</i>… unless they play a <b>3</b> (or another <b>Joker</b>), which passes that fate to the player after them, and so on until someone with no answer scoops it all.</li>
       <li><b>Four of a kind</b> on the pile burns it — same as a 10.</li>
     </ul>
     <p><b>Endgame:</b> once your hand is empty, play your 3 face-up cards. Then play your 3 face-down cards <b>blind</b> — flip one; if it beats the pile it stays, otherwise you take the pile.</p>`;
@@ -1425,7 +1478,7 @@ function startTutorial() {
   state = createState({ players, options });
   state.current = 0;                   // make it the human's turn so the controls show
   ui.humans = ["you"]; ui.humanId = "you";
-  ui.handOrders = {}; ui.faceUpSlots = {}; ui.toastedAch = new Set();
+  ui.handOrders = {}; ui.faceUpSlots = {}; ui.faceDownSlots = {}; ui.toastedAch = new Set();
   ui.summaries = { you: { ...emptySummary(), difficulty: "easy", total: 2 } };
   enterPlay();                         // CPUs are gated by ui.tutorialActive
   coachStep(0);
