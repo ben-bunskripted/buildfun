@@ -80,8 +80,8 @@ function setupCardZoom() {
     document.body.appendChild(wrap);
     zoom = wrap;
   }
-  document.addEventListener("mouseover", (e) => { const c = zoomable(e.target); if (c) show(c); });
-  document.addEventListener("mouseout", (e) => { if (zoomable(e.target)) hide(); });
+  // Touch long-press only — the desktop hover-zoom was distracting on the
+  // table cards, so it's been dropped.
   document.addEventListener("touchstart", (e) => {
     const c = zoomable(e.target);
     if (!c) return;
@@ -614,49 +614,36 @@ function renderCenter(myTurn, summ) {
 }
 
 function renderYou(viewer, myTurn, zone, summ) {
-  // face-down
-  const fdHost = $("#you-facedown"); fdHost.replaceChildren();
   // No blind flips while under a joker attack — the pile must be taken.
   const blindActive = myTurn && zone === "faceDown" && !(summ && summ.underAttack);
   // Endgame: tap face-up cards to take them into hand (not under attack).
   const takeActive = myTurn && summ && summ.canTakeFaceUp;
   // Joker deflection straight off the face-up row still uses select-to-play.
   const deflectActive = myTurn && summ && summ.underAttack && zone === "faceUp";
-  viewer.faceDown.forEach((c, i) => {
-    const stack = document.createElement("div");
-    stack.className = "mini-stack you-stack";
+
+  // Your table — two separate rows above the deck (face-up over face-down).
+  // Face-up row: tap to take into hand (endgame) or to deflect with a 3.
+  const fuHost = $("#you-faceup"); fuHost.replaceChildren();
+  viewer.faceUp.forEach((c) => {
+    if (takeActive) {
+      const el = renderCard(c, { className: "takeable" });
+      el.addEventListener("click", () => onTakeFaceUp(c.id));
+      fuHost.appendChild(el);
+    } else if (deflectActive) {
+      fuHost.appendChild(makeSelectableCard(c, "faceUp", true, summ));
+    } else {
+      fuHost.appendChild(renderCard(c, {}));
+    }
+  });
+  // Face-down row: blind backs, flipped one at a time in the blind phase.
+  const fdHost = $("#you-facedown"); fdHost.replaceChildren();
+  viewer.faceDown.forEach((c) => {
     const back = renderCardBack({ className: blindActive ? "selectable blind" : "" });
     if (blindActive) back.addEventListener("click", () => onBlindFlip(c.id));
-    stack.appendChild(back);
-    if (viewer.faceUp[i]) {
-      const up = renderCard(viewer.faceUp[i], { className: "on-top" });
-      if (takeActive) { up.classList.add("takeable"); up.addEventListener("click", () => onTakeFaceUp(viewer.faceUp[i].id)); }
-      stack.appendChild(up);
-    }
-    fdHost.appendChild(stack);
+    fdHost.appendChild(back);
   });
-  // any standalone face-up (when fewer face-down than face-up)
-  const fuHost = $("#you-faceup"); fuHost.replaceChildren();
-  if (viewer.faceDown.length === 0) {
-    viewer.faceUp.forEach((c) => {
-      if (takeActive) {
-        const el = renderCard(c, { className: "takeable" });
-        el.addEventListener("click", () => onTakeFaceUp(c.id));
-        fuHost.appendChild(el);
-      } else {
-        fuHost.appendChild(makeSelectableCard(c, "faceUp", deflectActive, summ));
-      }
-    });
-  }
-  if (deflectActive && viewer.faceDown.length > 0) {
-    // Under attack: the face-up cards sit on the stacks; make the 3s selectable.
-    $$("#you-facedown .on-top").forEach((el) => {
-      const id = el.dataset.cardId;
-      el.classList.add("selectable");
-      bindSelect(el, id, "faceUp", summ);
-      if (ui.selected.includes(id)) el.classList.add("selected");
-    });
-  }
+  const tableLabel = $("#you-table-label");
+  if (tableLabel) tableLabel.hidden = viewer.faceUp.length === 0 && viewer.faceDown.length === 0;
 
   // hand — skip the rebuild while a drag is live (the lifted node lives in
   // <body>); onDragEnd flushes the deferred render once the drag tears down.
@@ -1063,7 +1050,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v11";
+const APP_BUILD = "v12";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
