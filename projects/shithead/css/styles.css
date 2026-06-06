@@ -226,6 +226,9 @@ body {
      :root --card-h bakes in the base --card-w, so it won't follow this halved
      --card-w on its own (which left the card box double-height → white bars). */
   --card-w: calc(var(--base-cw, 72px) * .5); --card-h: calc(var(--card-w) * 1.553); }
+/* Full table → 2×2 grid of player panels (smaller cards so 3 fit in a half-width cell). */
+.player-rows.cols-2 { display: grid; grid-template-columns: 1fr 1fr; align-content: start;
+  --card-w: calc(var(--base-cw, 72px) * .42); --card-h: calc(var(--card-w) * 1.553); }
 .player-row { background: var(--panel); border: 1.5px solid transparent; border-radius: 14px; padding: 7px 10px 9px; box-shadow: var(--shadow); transition: border-color .2s, box-shadow .2s; }
 .player-row.is-current { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(245,196,81,.3) inset, var(--shadow); }
 .player-row.finished { opacity: .6; }
