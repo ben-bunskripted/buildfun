@@ -42,6 +42,12 @@ body {
 /* ---------------- screens ---------------- */
 .screen { display: none; min-height: 100dvh; }
 .screen.active { display: flex; flex-direction: column; }
+/* The play screen is a fixed-height, non-scrolling column: the player rows
+   scroll internally while the hand + action bar stay pinned at the bottom
+   (so the Play button is never hidden behind the iOS address bar). 100dvh
+   tracks the *visible* viewport, and the action bar adds the safe-area inset. */
+#screen-play { min-height: 0; }
+#screen-play.active { height: 100dvh; max-height: 100dvh; overflow: hidden; }
 
 /* ---------------- buttons ---------------- */
 .btn {
@@ -210,56 +216,53 @@ body {
 .card-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 .card-row.tight { gap: 4px; }
 
-/* ---------------- opponents (seated around the pile) ---------------- */
-/* #opponents is display:contents so its .opp children position themselves
-   absolutely against .center-table — above (seat-top) and to the left/right
-   (seat-left / seat-right) of the central deck + discard. */
-#opponents { display: contents; }
-.opp { position: absolute; z-index: 3; background: var(--panel); border-radius: 14px; padding: 7px 9px; display: flex; flex-direction: column; align-items: center; gap: 5px; box-shadow: var(--shadow); transition: box-shadow .2s, transform .2s;
-  /* opponent table cards scale with the chosen card size, but clamped so the
-     seats never grow into the central pile at L/XL. */
-  --mini-w: clamp(28px, calc(var(--card-w) * .38), 34px); --mini-h: calc(var(--mini-w) * 1.553); }
-.opp.active { box-shadow: 0 0 0 2.5px var(--gold); }
-.opp.finished { opacity: .55; }
-.opp.seat-top   { top: 2px;  left: 50%; transform: translateX(-50%); }
-.opp.active.seat-top   { transform: translateX(-50%) translateY(-2px); }
-/* Side players face the middle: a quarter-turn so their cards point inward,
-   pivoted near the screen edge so the turned panel clears the central pile. */
-.opp.seat-left  { left: 2px;  top: 46%; transform-origin: 42px center; transform: translateY(-50%) rotate(90deg); }
-.opp.seat-right { right: 2px; top: 46%; transform-origin: calc(100% - 42px) center; transform: translateY(-50%) rotate(-90deg); }
-.opp.active.seat-left  { transform: translateY(-50%) rotate(90deg) scale(1.04); }
-.opp.active.seat-right { transform: translateY(-50%) rotate(-90deg) scale(1.04); }
-.opp-head { display: flex; align-items: center; gap: 7px; font-size: .82rem; }
-.opp-name { font-weight: 700; }
-.opp-count { color: var(--ink-dim); font-weight: 650; }
+/* ---------------- player rows (stacked above the deck, Benny-style) ---------------- */
+/* Every player is a panel: name + key stat, then their table cards. The whole
+   list scrolls vertically when it's too tall; each row's cards scroll
+   horizontally when too wide. Row cards are half a play card and scale with the
+   size selection (override --card-w just for this subtree). */
+.player-rows { flex: 1 1 auto; min-height: 0; width: 100%; max-width: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding: 2px;
+  --card-w: calc(var(--base-cw, 72px) * .5); }
+.player-row { background: var(--panel); border: 1.5px solid transparent; border-radius: 14px; padding: 7px 10px 9px; box-shadow: var(--shadow); transition: border-color .2s, box-shadow .2s; }
+.player-row.is-current { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(245,196,81,.3) inset, var(--shadow); }
+.player-row.finished { opacity: .6; }
+.player-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.player-row-name { display: flex; align-items: center; gap: 7px; font-weight: 750; font-size: .92rem; min-width: 0; }
+.pr-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-badge { flex: 0 0 auto; font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #ffe7a8; background: rgba(245,196,81,.22); border: 1px solid rgba(245,196,81,.4); border-radius: 999px; padding: 1px 7px; }
+.player-row-meta { flex: 0 0 auto; color: var(--ink-dim); font-weight: 700; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.hand-count { white-space: nowrap; }
 .badge.done { background: var(--good); color: #06321f; border-radius: 999px; padding: 1px 8px; font-weight: 800; font-size: .78rem; }
-.opp-table { display: flex; gap: 3px; justify-content: center; }
-.opp .mini-stack { width: var(--mini-w); height: var(--mini-h); }
-.opp .opp-table > .card.mini { position: relative; width: var(--mini-w); height: var(--mini-h); }
 
-/* shared stack internals (used by both the opponents and your own table) */
+/* the row of table cards — face-up lifted over face-down so the hidden card peeks out */
+.player-row-table { position: relative; display: flex; align-items: flex-end; gap: 6px; min-height: var(--card-h); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 2px; }
+.player-row-table::-webkit-scrollbar { display: none; }
+.player-row-table .mini-stack { flex: 0 0 auto; width: var(--card-w); height: var(--card-h); }
+.player-row-table > .card { flex: 0 0 auto; }
+.player-row-table .mini-stack .card.on-top { transform: translateY(-16%); }
+.player-row-table.ov-right { -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent 100%); mask-image: linear-gradient(90deg, #000 86%, transparent 100%); }
+.player-row-table.ov-left { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%); mask-image: linear-gradient(90deg, transparent 0, #000 14%); }
+.player-row-table.ov-left.ov-right { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%); }
+.pr-empty { color: var(--ink-dim); opacity: .5; font-weight: 700; align-self: center; }
+
+/* shared stack internals (used by the player-row table cards) */
 .mini-stack { position: relative; }
 .mini-stack .card { position: absolute; inset: 0; width: 100%; height: 100%; }
 .card.on-top { position: absolute; left: 0; top: 0; }
 /* Endgame: face-up cards you can tap to pull into your hand. */
-.card.takeable { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: calc(var(--card-w) * .11); animation: takeablePulse 1.5s ease-in-out infinite; }
+.card.takeable { cursor: pointer; outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: calc(var(--card-w) * .11); animation: takeablePulse 1.5s ease-in-out infinite; z-index: 2; }
 @keyframes takeablePulse { 0%, 100% { outline-color: var(--gold); } 50% { outline-color: color-mix(in srgb, var(--gold) 35%, transparent); } }
 
-/* Lift the opponent face-up card so the face-down card beneath peeks out. */
-.opp-table .mini-stack .card.on-top { transform: translateY(-16%); }
-
 /* ---------------- center table ---------------- */
-/* Top padding reserves room for the (absolutely-placed) top seat so the
-   centred pile never grows up into it at L/XL. */
-.center-table { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: calc(var(--base-cw, var(--card-w)) * .1 + 80px) 6px 6px; min-height: 300px; }
-.pile-zone { display: flex; align-items: center; gap: 16px; }
+.center-table { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 6px 6px; min-height: 0; --base-cw: var(--card-w); }
+.pile-zone { position: relative; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; }
 .deck-stack { position: relative; }
 .deck-stack .count, .pile-count, .burned-zone .count { position: absolute; bottom: -6px; right: -6px; background: var(--bg-3); color: var(--ink); border-radius: 999px; padding: 2px 7px; font-size: .8rem; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .deck-stack.empty { opacity: .35; }
 .discard-zone { position: relative; width: var(--card-w); height: var(--card-h); display: flex; align-items: center; justify-content: center; }
 .discard-zone .discard-card { position: absolute; left: calc(var(--i, 0) * 6px); top: calc(var(--i, 0) * -2px); }
 .discard-empty { width: var(--card-w); height: var(--card-h); border: 2px dashed var(--panel-2); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); font-weight: 700; }
-.burned-zone { position: absolute; right: 8px; bottom: 10px; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 1.2rem; opacity: .85; z-index: 2; }
+.burned-zone { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 1.2rem; opacity: .85; align-self: center; }
 .burned-zone .count { position: static; font-size: .78rem; }
 .burned-zone.pulse { animation: burnedPulse .7s ease-out; }
 @keyframes burnedPulse { 0% { transform: scale(1); } 35% { transform: scale(1.5); filter: drop-shadow(0 0 8px #ff8c28); } 100% { transform: scale(1); } }
@@ -318,15 +321,7 @@ body {
 @keyframes zoomPop { from { transform: scale(.85); opacity: .4; } to { transform: scale(1); opacity: 1; } }
 
 /* ---------------- you area ---------------- */
-.you-area { padding: 6px 8px 4px; }
-/* Your table cards: two separate rows (face-up over face-down) sitting just
-   above the deck, Benny-style. Sized down from the play card so both rows +
-   the pile fit comfortably; capture the tier --card-w first so the override
-   below isn't a self-reference. */
-.center-table { --base-cw: var(--card-w); }
-#you-table { --card-w: calc(var(--base-cw) * .58); display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0 0 4px; }
-#you-table .card-row { gap: 4px; }
-.you-table-label { font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
+.you-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 /* Hand overlap is driven by --hand-overlap (set by layoutHand); the fan adds a
@@ -360,7 +355,9 @@ body.hand-dragging input, body.hand-dragging textarea { -webkit-user-select: tex
 
 /* ---------------- action bar ---------------- */
 .action-bar { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-.play-actions { background: var(--bg-3); }
+/* On the play screen the buttons sit ABOVE the hand (Benny-style), so the
+   safe-area inset moves to the hand area below; this is a control strip. */
+.play-actions { background: var(--bg-3); padding-bottom: 12px; border-top: 1px solid var(--panel-2); }
 .sel-info { color: var(--ink-dim); font-weight: 650; min-width: 80px; text-align: center; }
 
 /* ---------------- swap ---------------- */

@@ -643,52 +643,101 @@ function renderPlay() {
   else pill.textContent = `${cur.name} is playing…`;
   pill.classList.toggle("yours", myTurn);
 
-  renderOpponents(viewer);
+  renderPlayerRows(viewer, myTurn, zone, summ);
   renderCenter(myTurn, summ);
-  renderYou(viewer, myTurn, zone, summ);
+  renderHand(viewer, myTurn, zone, summ);
   renderActions(viewer, myTurn, zone, summ);
 }
 
-// Seat the opponents around the central pile: one above, or to the left and
-// right, or all three (left / above / right) depending on how many there are.
-const SEATS = { 1: ["top"], 2: ["left", "right"], 3: ["left", "top", "right"] };
-
-function renderOpponents(viewer) {
-  const host = $("#opponents");
+// Every player as a stacked row above the deck (Benny-style): name + key stat,
+// then their table cards. You come first, labelled "(you)"; your own row is the
+// one with the interactive face-up / face-down cards.
+function renderPlayerRows(viewer, myTurn, zone, summ) {
+  const host = $("#player-rows");
   host.replaceChildren();
-  const others = state.players.filter((p) => p.id !== viewer.id);
-  const seats = SEATS[others.length] || others.map(() => "top");
-  others.forEach((p, idx) => {
-    const el = document.createElement("div");
-    el.className = "opp seat-" + (seats[idx] || "top");
-    if (state.players[state.current].id === p.id && state.phase === "play") el.classList.add("active");
-    if (p.finished) el.classList.add("finished");
+  const curId = state.phase === "play" ? state.players[state.current].id : null;
+  const order = [viewer, ...state.players.filter((p) => p.id !== viewer.id)];
+  for (const p of order) {
+    const isViewer = p.id === viewer.id;
+    const row = document.createElement("div");
+    row.className = "player-row";
+    if (p.id === curId) row.classList.add("is-current");
+    if (p.finished) row.classList.add("finished");
 
     const head = document.createElement("div");
-    head.className = "opp-head";
-    head.innerHTML = `<span class="opp-name">${escapeHtml(p.name)}</span>` +
-      (p.finished
-        ? `<span class="badge done">#${p.place}</span>`
-        : `<span class="opp-count">✋ ${p.hand.length}</span>`);
-    el.appendChild(head);
+    head.className = "player-row-head";
+    const name = document.createElement("div");
+    name.className = "player-row-name";
+    name.innerHTML = `<span class="pr-name-text">${escapeHtml(p.name)}${isViewer ? " (you)" : ""}</span>`;
+    if (p.id === curId) {
+      const t = document.createElement("span");
+      t.className = "pr-badge"; t.textContent = "Turn";
+      name.appendChild(t);
+    }
+    head.appendChild(name);
+    const meta = document.createElement("div");
+    meta.className = "player-row-meta";
+    meta.innerHTML = p.finished
+      ? `<span class="badge done">#${p.place}</span>`
+      : `<span class="hand-count">✋ ${p.hand.length}</span>`;
+    head.appendChild(meta);
+    row.appendChild(head);
 
-    const table = document.createElement("div");
-    table.className = "opp-table";
-    // face-down backs
-    for (let i = 0; i < p.faceDown.length; i++) {
-      const stack = document.createElement("div");
-      stack.className = "mini-stack";
-      stack.appendChild(renderCardBack({ className: "mini" }));
-      if (p.faceUp[i]) stack.appendChild(renderCard(p.faceUp[i], { className: "mini on-top" }));
-      table.appendChild(stack);
+    row.appendChild(renderPlayerTable(p, {
+      blindActive: isViewer && myTurn && zone === "faceDown" && !(summ && summ.underAttack),
+      takeActive: isViewer && myTurn && summ && summ.canTakeFaceUp,
+      deflectActive: isViewer && myTurn && summ && summ.underAttack && zone === "faceUp",
+      summ,
+    }));
+    host.appendChild(row);
+  }
+  requestAnimationFrame(() => $$(".player-row-table", host).forEach(updateRowOverflow));
+}
+
+// A player's face-down + face-up table cards. The face-up sits on the face-down
+// with a slight lift so the hidden card peeks out beneath it. The viewer's own
+// cards are wired for blind flips / taking into hand / joker deflection.
+function renderPlayerTable(p, o = {}) {
+  const host = document.createElement("div");
+  host.className = "player-row-table";
+  host.addEventListener("scroll", () => updateRowOverflow(host), { passive: true });
+  const wireUp = (up, id) => {
+    if (o.takeActive) { up.classList.add("takeable"); up.addEventListener("click", () => onTakeFaceUp(id)); }
+    else if (o.deflectActive) { up.classList.add("selectable"); bindSelect(up, id, "faceUp", o.summ); if (ui.selected.includes(id)) up.classList.add("selected"); }
+  };
+  for (let i = 0; i < p.faceDown.length; i++) {
+    const stack = document.createElement("div");
+    stack.className = "mini-stack";
+    const back = renderCardBack({ className: o.blindActive ? "selectable blind" : "" });
+    if (o.blindActive) back.addEventListener("click", () => onBlindFlip(p.faceDown[i].id));
+    stack.appendChild(back);
+    if (p.faceUp[i]) {
+      const up = renderCard(p.faceUp[i], { className: "on-top" });
+      wireUp(up, p.faceUp[i].id);
+      stack.appendChild(up);
     }
-    // any face-up beyond face-down count
-    for (let i = p.faceDown.length; i < p.faceUp.length; i++) {
-      table.appendChild(renderCard(p.faceUp[i], { className: "mini" }));
-    }
-    el.appendChild(table);
-    host.appendChild(el);
-  });
+    host.appendChild(stack);
+  }
+  // any face-up beyond the face-down count (no card hidden under these)
+  for (let i = p.faceDown.length; i < p.faceUp.length; i++) {
+    const up = renderCard(p.faceUp[i], {});
+    wireUp(up, p.faceUp[i].id);
+    host.appendChild(up);
+  }
+  if (!p.faceDown.length && !p.faceUp.length) {
+    const none = document.createElement("span");
+    none.className = "pr-empty"; none.textContent = "—";
+    host.appendChild(none);
+  }
+  return host;
+}
+
+// Gold edge hint when a row's cards overflow horizontally and can be scrolled.
+function updateRowOverflow(el) {
+  const max = el.scrollWidth - el.clientWidth;
+  if (max <= 2) { el.classList.remove("ov-left", "ov-right"); return; }
+  el.classList.toggle("ov-left", el.scrollLeft > 2);
+  el.classList.toggle("ov-right", el.scrollLeft < max - 2);
 }
 
 function renderCenter(myTurn, summ) {
@@ -730,38 +779,7 @@ function renderCenter(myTurn, summ) {
   else hint.textContent = `Beat ${cc.rank}${SUIT_GLYPH[cc.suit]} — play equal or higher`;
 }
 
-function renderYou(viewer, myTurn, zone, summ) {
-  // No blind flips while under a joker attack — the pile must be taken.
-  const blindActive = myTurn && zone === "faceDown" && !(summ && summ.underAttack);
-  // Endgame: tap face-up cards to take them into hand (not under attack).
-  const takeActive = myTurn && summ && summ.canTakeFaceUp;
-  // Joker deflection straight off the face-up row still uses select-to-play.
-  const deflectActive = myTurn && summ && summ.underAttack && zone === "faceUp";
-
-  // Your table — two separate rows above the deck (face-up over face-down).
-  // Face-up row: tap to take into hand (endgame) or to deflect with a 3.
-  const fuHost = $("#you-faceup"); fuHost.replaceChildren();
-  viewer.faceUp.forEach((c) => {
-    if (takeActive) {
-      const el = renderCard(c, { className: "takeable" });
-      el.addEventListener("click", () => onTakeFaceUp(c.id));
-      fuHost.appendChild(el);
-    } else if (deflectActive) {
-      fuHost.appendChild(makeSelectableCard(c, "faceUp", true, summ));
-    } else {
-      fuHost.appendChild(renderCard(c, {}));
-    }
-  });
-  // Face-down row: blind backs, flipped one at a time in the blind phase.
-  const fdHost = $("#you-facedown"); fdHost.replaceChildren();
-  viewer.faceDown.forEach((c) => {
-    const back = renderCardBack({ className: blindActive ? "selectable blind" : "" });
-    if (blindActive) back.addEventListener("click", () => onBlindFlip(c.id));
-    fdHost.appendChild(back);
-  });
-  const tableLabel = $("#you-table-label");
-  if (tableLabel) tableLabel.hidden = viewer.faceUp.length === 0 && viewer.faceDown.length === 0;
-
+function renderHand(viewer, myTurn, zone, summ) {
   // hand — skip the rebuild while a drag is live (the lifted node lives in
   // <body>); onDragEnd flushes the deferred render once the drag tears down.
   const hHost = $("#you-hand");
@@ -953,7 +971,7 @@ function setupHandDrag() {
         const dz = $("#discard-zone");
         if (!dz) return null;
         const r = dz.getBoundingClientRect();
-        const pad = 28;
+        const pad = 44;        // forgiving hit area — the pile sits up in the centre now
         if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) {
           return { el: dz, kind: "discard" };
         }
@@ -1167,7 +1185,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v13";
+const APP_BUILD = "v14";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1360,7 +1378,7 @@ const TUTORIAL_STEPS = [
   { target: "#deck-stack", title: "Draw pile", body: "After playing from your hand you draw back up to three cards — while the deck lasts. So your hand stays at three until it runs out." },
   { target: "#pickup-btn", title: "Stuck?", body: "Can't (or don't want to) play? Pick up the whole pile into your hand — then it's the next player's go." },
   { target: null, title: "Power cards", body: "Look out for power cards: 2 resets the pile, 10 burns it, 7 forces a low play, 8 reverses the order, and a Joker makes the next player scoop everything. Toggle them in House rules." },
-  { target: "#you-facedown", title: "The endgame", body: "When your hand is empty, play your three face-up cards. Then the three face-down cards are played blind — flip one and hope it beats the pile!" },
+  { target: "#player-rows", title: "The table", body: "Every player's table sits here — face-up cards over face-down. When your hand empties, tap your face-up cards into your hand and play them. The three face-down cards are last, played blind!" },
   { target: null, title: "You're ready!", body: "That's the gist. This is a practice game against an easy bot — have a go. Good luck, and don't be the Sh!thead!" },
 ];
 
