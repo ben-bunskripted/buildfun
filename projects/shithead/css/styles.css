@@ -222,7 +222,10 @@ body {
    horizontally when too wide. Row cards are half a play card and scale with the
    size selection (override --card-w just for this subtree). */
 .player-rows { flex: 1 1 auto; min-height: 0; width: 100%; max-width: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding: 2px;
-  --card-w: calc(var(--base-cw, 72px) * .5); }
+  /* Halve the card size for row cards. --card-h must be overridden too: the
+     :root --card-h bakes in the base --card-w, so it won't follow this halved
+     --card-w on its own (which left the card box double-height → white bars). */
+  --card-w: calc(var(--base-cw, 72px) * .5); --card-h: calc(var(--card-w) * 1.553); }
 .player-row { background: var(--panel); border: 1.5px solid transparent; border-radius: 14px; padding: 7px 10px 9px; box-shadow: var(--shadow); transition: border-color .2s, box-shadow .2s; }
 .player-row.is-current { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(245,196,81,.3) inset, var(--shadow); }
 .player-row.finished { opacity: .6; }
