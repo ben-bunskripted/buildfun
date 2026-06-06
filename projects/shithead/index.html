@@ -40,10 +40,22 @@
 
     <div class="home-section">
       <h2 class="section-title">New game</h2>
-      <div class="mode-tabs" role="tablist">
-        <button class="mode-tab active" data-mode="cpu" role="tab">Solo vs CPU</button>
-        <button class="mode-tab" data-mode="local" role="tab">Pass &amp; Play</button>
-        <button class="mode-tab" data-mode="online" role="tab">Online</button>
+      <div class="mode-tiles" id="mode-tiles" role="tablist">
+        <button class="mode-tile active" data-mode="cpu" role="tab">
+          <span class="mode-tile-icon" aria-hidden="true">🤖</span>
+          <span class="mode-tile-info"><span class="mode-tile-title">Solo vs CPU</span><span class="mode-tile-desc">Play against the computer</span></span>
+          <span class="mode-tile-check" aria-hidden="true"></span>
+        </button>
+        <button class="mode-tile" data-mode="local" role="tab">
+          <span class="mode-tile-icon" aria-hidden="true">👥</span>
+          <span class="mode-tile-info"><span class="mode-tile-title">Pass &amp; Play</span><span class="mode-tile-desc">Hot-seat on one device</span></span>
+          <span class="mode-tile-check" aria-hidden="true"></span>
+        </button>
+        <button class="mode-tile" data-mode="online" role="tab">
+          <span class="mode-tile-icon" aria-hidden="true">🌐</span>
+          <span class="mode-tile-info"><span class="mode-tile-title">Online</span><span class="mode-tile-desc">Play with friends — coming soon</span></span>
+          <span class="mode-tile-check" aria-hidden="true"></span>
+        </button>
       </div>
 
     <div class="setup-card">
@@ -99,6 +111,7 @@
     <div class="start-links">
       <button class="link" id="howto-link">How to play</button>
       <button class="link" id="settings-link">Settings</button>
+      <button class="link" id="tutorial-foot">Replay tutorial</button>
     </div>
     <p class="app-version" id="app-version" title="Running version"></p>
     <p class="tagline">Don't be the Sh!thead.</p>
