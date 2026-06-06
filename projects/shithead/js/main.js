@@ -655,6 +655,7 @@ function renderPlay() {
 function renderPlayerRows(viewer, myTurn, zone, summ) {
   const host = $("#player-rows");
   host.replaceChildren();
+  host.classList.toggle("cols-2", state.players.length >= 4);   // 2×2 grid for a full table
   const curId = state.phase === "play" ? state.players[state.current].id : null;
   const order = [viewer, ...state.players.filter((p) => p.id !== viewer.id)];
   for (const p of order) {
@@ -1185,7 +1186,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v15";
+const APP_BUILD = "v16";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
