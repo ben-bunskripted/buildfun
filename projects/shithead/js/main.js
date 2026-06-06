@@ -9,8 +9,8 @@ import {
 import { comparisonCard, requirement, SUIT_GLYPH, value } from "./rules.js";
 import { planTurn, planSwaps } from "./ai.js";
 import * as storage from "./storage.js";
-import { recordMatch, addAchievements, getProfile, listProfiles } from "./profiles.js";
-import { evaluate, emptySummary, achievementById, ACHIEVEMENTS } from "./achievements.js";
+import { recordMatch, addAchievements, accrueProgress, getProfile, listProfiles } from "./profiles.js";
+import { evaluate, evaluateProgress, emptySummary, achievementById, ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS } from "./achievements.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -28,6 +28,7 @@ const ui = {
   summaries: {},    // per-human achievement tally
   handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
   pendingHandRender: false, // a hand rebuild deferred because a drag is live
+  toastedAch: new Set(),    // achievements already toasted this match
   cpuTimer: null,
   busy: false,      // an action animation is in flight
   setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
@@ -202,6 +203,7 @@ function startNewGame() {
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
+  ui.toastedAch = new Set();
   ui.summaries = {};
   for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
@@ -335,10 +337,28 @@ function scheduleTurn() {
 function doAction(action) {
   applyAction(state, action);
   trackEvent();
+  maybeToastAchievements();
   persist();
   renderPlay();
   const wait = prefs.animate !== false ? 360 : 30;
   ui.cpuTimer = setTimeout(scheduleTurn, wait);
+}
+
+// Achievements that can be settled mid-game (no dependence on final place /
+// Sh!thead status) — toast them the moment they're earned for instant feedback.
+const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing"]);
+function maybeToastAchievements() {
+  const e = state && state.lastEvent;
+  if (!e || !e.playerId) return;
+  const s = ui.summaries[e.playerId];   // only tracked humans have a summary
+  if (!s) return;
+  const have = new Set(getProfile(byId(e.playerId).name).achievements);
+  for (const id of evaluate(s)) {
+    if (!LIVE_ACH.has(id) || have.has(id) || ui.toastedAch.has(id)) continue;
+    ui.toastedAch.add(id);
+    const a = achievementById(id);
+    if (a) toast(`🏆 ${a.icon || ""} ${a.name} unlocked!`);
+  }
 }
 
 function fastForward() {
@@ -758,6 +778,7 @@ function endMatch() {
     recordMatch(p.name, { place: p.place, isShithead: isShit, total, mode });
     const s = ui.summaries[id];
     s.place = p.place; s.isShithead = isShit; s.total = total;
+    accrueProgress(p.name, s);
     const earnedIds = evaluate(s);
     const fresh = addAchievements(p.name, earnedIds);
     if (fresh.length && (mode === "cpu" || id === ui.viewerId || ui.humans.length === 1)) {
@@ -833,6 +854,7 @@ function onResume() {
   for (const id of ui.humans) if (!ui.summaries[id]) ui.summaries[id] = { ...emptySummary(), total: state.players.length };
   ui.selected = [];
   ui.handOrders = {};
+  ui.toastedAch = new Set();
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
@@ -885,7 +907,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v6";
+const APP_BUILD = "v7";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -930,6 +952,52 @@ function achievementsGrid(unlockedIds) {
   return grid;
 }
 
+// A lifetime "goal" tile with a progress bar.
+function renderProgressCard(item) {
+  const { def, value, target, unlocked } = item;
+  const pct = Math.round((value / target) * 100);
+  const el = document.createElement("div");
+  el.className = `achievement-card has-progress ${unlocked ? "is-unlocked" : ""}`;
+  el.innerHTML =
+    `<div class="achievement-icon" aria-hidden="true">${def.icon || "🏆"}</div>` +
+    `<div class="achievement-info">` +
+    `<div class="achievement-name">${escapeHtml(def.name)}</div>` +
+    `<div class="achievement-desc">${escapeHtml(def.desc)}</div>` +
+    `<div class="ach-progress"><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${pct}%"></div></div>` +
+    `<span class="ach-progress-label">${value} / ${target}</span></div></div>`;
+  return el;
+}
+function progressGrid(profile) {
+  const grid = document.createElement("div");
+  grid.className = "achievements-grid";
+  const items = profile ? evaluateProgress(profile)
+    : PROGRESS_ACHIEVEMENTS.map((def) => ({ def, value: 0, target: def.target, unlocked: false }));
+  for (const item of items) grid.appendChild(renderProgressCard(item));
+  return grid;
+}
+
+// Recent-results sparkline: one bar per game, taller = better finish, coloured
+// gold (win) / grey (mid) / red (Sh!thead). Newest on the right.
+function renderSparkline(history) {
+  const games = (history || []).slice(0, 18).reverse();
+  const wrap = document.createElement("div");
+  wrap.className = "spark";
+  for (const g of games) {
+    const perf = g.total > 1 ? (g.total - g.place) / (g.total - 1) : (g.place === 1 ? 1 : 0);
+    const bar = document.createElement("span");
+    bar.className = "spark-bar " + (g.isShithead ? "shit" : g.place === 1 ? "win" : "mid");
+    bar.style.height = `${Math.round(8 + perf * 26)}px`;
+    bar.title = g.isShithead ? "Sh!thead" : `#${g.place} of ${g.total}`;
+    wrap.appendChild(bar);
+  }
+  return wrap;
+}
+function sectionTitle(text) {
+  const h = document.createElement("div");
+  h.className = "ach-section-title"; h.textContent = text;
+  return h;
+}
+
 function openStats() {
   const body = $("#stats-body");
   const profiles = listProfiles();
@@ -939,7 +1007,10 @@ function openStats() {
     note.className = "muted";
     note.textContent = "No games played yet — here's everything there is to unlock:";
     body.appendChild(note);
+    body.appendChild(sectionTitle("Achievements"));
     body.appendChild(achievementsGrid([]));
+    body.appendChild(sectionTitle("Lifetime goals"));
+    body.appendChild(progressGrid(null));
   } else {
     for (const prof of profiles) {
       const s = prof.stats;
@@ -953,7 +1024,14 @@ function openStats() {
           <span>Best streak</span><b>${s.bestStreak}</b>
         </div>
         <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
+      if (prof.history && prof.history.length) {
+        div.appendChild(sectionTitle("Recent games"));
+        div.appendChild(renderSparkline(prof.history));
+      }
+      div.appendChild(sectionTitle("Achievements"));
       div.appendChild(achievementsGrid(prof.achievements));
+      div.appendChild(sectionTitle("Lifetime goals"));
+      div.appendChild(progressGrid(prof));
       body.appendChild(div);
     }
   }
