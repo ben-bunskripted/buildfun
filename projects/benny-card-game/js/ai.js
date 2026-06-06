@@ -636,6 +636,18 @@ function planAfterDraw(state, actions, difficulty) {
       const v = virtualState(state, actions);
       const me = v.players[v.currentPlayerIndex];
       if (!me.hasOpened) break;
+      // This is the DEVELOP path — we're not going out this turn (planGoOut,
+      // which can swap a benny free and meld it to win, already ran and failed).
+      // Reclaiming a benny here just to hold it moves a 15-point card OFF the
+      // table (0 pts to us) and INTO our hand (15 pts if we're caught), trading
+      // away a low natural for it. It only pays off if we keep the benny long
+      // enough to cash it as go-out fuel later. With a short hand — or an
+      // opponent about to go out — we can't, and we get marooned holding the 15
+      // (the "swapped my last card for a benny and got caught" trap). So only
+      // reclaim with genuine breathing room and no imminent out; this mirrors
+      // the discard-hoard taper, which hoards a swap-key fully only at >=5 cards.
+      if (me.hand.length < 5) break;
+      if (maxOpponentThreat(v) >= 80) break;
       const swaps = enumerateSwaps(me.hand, v.table, wildRank);
       if (!swaps.length) break;
       const s = swaps[0];
@@ -709,12 +721,49 @@ function planGoesOut(state, plan) {
 // Seek a line that empties the hand this turn (winning the round). Sheds as
 // many cards as possible via plays/adds — without the positional heuristics
 // that only matter when the round continues — then checks whether the forecast
-// goes out. Swaps are skipped: a 1-for-1 swap never shrinks the hand, so it
-// can't contribute to going out. `draw` is the opening draw action, or null on
-// the dealer's no-draw opening turn. Returns the winning plan, or null.
+// goes out. A swap on its own is 1-for-1 and doesn't shrink the hand, BUT in
+// shed mode the benny it frees can be laid straight back onto a set (padding a
+// complete four-of-a-kind, or extending a run), which DOES shrink the hand. So
+// a swap can unlock a go-out: e.g. swap our last natural for a benny trapped
+// mid-run, lay that benny onto a complete set, then discard to win. We greedily
+// take any swap that, once the shed loop re-runs, leaves us holding fewer cards.
+// `draw` is the opening draw action, or null on the dealer's no-draw opening
+// turn. Returns the winning plan, or null.
 function planGoOut(state, draw, difficulty) {
+  const wildRank = state.wildcardRank;
   const actions = draw ? [draw] : [];
   applyPlayAndAddLoop(state, actions, difficulty, true);
+
+  if (difficulty !== "easy") {
+    let safety = 8;
+    while (safety-- > 0) {
+      const v = virtualState(state, actions);
+      const me = v.players[v.currentPlayerIndex];
+      if (!me.hasOpened || me.hand.length === 0) break;
+      const swaps = enumerateSwaps(me.hand, v.table, wildRank);
+      let advanced = false;
+      for (const s of swaps) {
+        // Try the swap, then re-shed; keep it only if the freed benny (or a
+        // chain it unlocks) actually got laid down, shrinking the hand.
+        const trial = actions.concat({
+          type: "swap",
+          setId: s.setId,
+          positionIndex: s.positionIndex,
+          naturalCardId: s.naturalCardId,
+          narration: `swapped a ${cardLabel(s.takesBack)} back into hand`,
+        });
+        applyPlayAndAddLoop(state, trial, difficulty, true);
+        if (virtualState(state, trial).players[v.currentPlayerIndex].hand.length < me.hand.length) {
+          actions.length = 0;
+          actions.push(...trial);
+          advanced = true;
+          break;
+        }
+      }
+      if (!advanced) break;
+    }
+  }
+
   const d = chooseDiscard(virtualState(state, actions), difficulty);
   if (d) actions.push(d);
   return planGoesOut(state, actions) ? actions : null;
