@@ -321,7 +321,7 @@ body {
 @keyframes zoomPop { from { transform: scale(.85); opacity: .4; } to { transform: scale(1); opacity: 1; } }
 
 /* ---------------- you area ---------------- */
-.you-area { padding: 6px 8px 4px; }
+.you-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 .hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
 /* Hand overlap is driven by --hand-overlap (set by layoutHand); the fan adds a
@@ -355,7 +355,9 @@ body.hand-dragging input, body.hand-dragging textarea { -webkit-user-select: tex
 
 /* ---------------- action bar ---------------- */
 .action-bar { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-.play-actions { background: var(--bg-3); }
+/* On the play screen the buttons sit ABOVE the hand (Benny-style), so the
+   safe-area inset moves to the hand area below; this is a control strip. */
+.play-actions { background: var(--bg-3); padding-bottom: 12px; border-top: 1px solid var(--panel-2); }
 .sel-info { color: var(--ink-dim); font-weight: 650; min-width: 80px; text-align: center; }
 
 /* ---------------- swap ---------------- */

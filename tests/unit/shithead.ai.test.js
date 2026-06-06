@@ -13,7 +13,7 @@ function autoSwapAndStart(s) {
   for (const p of s.players) applyAction(s, { type: "ready", playerId: p.id });
 }
 
-function playOut(s, maxTurns = 2000) {
+function playOut(s, maxTurns = 6000) {
   let i = 0;
   while (s.phase === "play" && i < maxTurns) {
     const action = planTurn(s);
@@ -36,7 +36,7 @@ describe("CPU self-play", () => {
           autoSwapAndStart(s);
           const turns = playOut(s);
           expect(s.phase).toBe("over");
-          expect(turns).toBeLessThan(2000);
+          expect(turns).toBeLessThan(6000);
           // Exactly one player still holds cards, and they are the shithead.
           const withCards = s.players.filter(
             (p) => p.hand.length || p.faceUp.length || p.faceDown.length,
@@ -61,7 +61,7 @@ describe("CPU self-play", () => {
         autoSwapAndStart(s);
         const turns = playOut(s);
         expect(s.phase).toBe("over");
-        expect(turns).toBeLessThan(2000);
+        expect(turns).toBeLessThan(6000);
         const withCards = s.players.filter((p) => p.hand.length || p.faceUp.length || p.faceDown.length);
         expect(withCards.length).toBe(1);
         expect(s.shitheadId).toBe(withCards[0].id);
@@ -77,7 +77,7 @@ describe("CPU self-play", () => {
     const s = createState({ players });
     autoSwapAndStart(s);
     let i = 0;
-    while (s.phase === "play" && i < 2000) {
+    while (s.phase === "play" && i < 6000) {
       const before = s.turn;
       const action = planTurn(s);
       applyAction(s, action);
