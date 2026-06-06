@@ -330,9 +330,17 @@ body {
 @keyframes zoomPop { from { transform: scale(.85); opacity: .4; } to { transform: scale(1); opacity: 1; } }
 
 /* ---------------- you area ---------------- */
-.you-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); }
-.hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
-.hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow-x: auto; overflow-y: visible; }
+/* clip horizontally (so a mis-sized hand can never bleed off the side) but keep
+   vertical visible for the fan lift. overflow-x:clip + overflow-y:visible does NOT
+   trigger the spec's visible→auto conversion, so this stays a non-scrolling box. */
+.you-area { padding: 4px 8px max(6px, env(safe-area-inset-bottom)); overflow-x: clip; overflow-y: visible; }
+/* overflow is visible (NOT overflow-x:auto) on purpose: with overflow-x:auto and
+   overflow-y:visible the spec computes overflow-y to auto too, which made the dock
+   a scroll container — the fanned cards' transforms then created a phantom
+   scrollable strip below the hand. Keeping it visible lets the fan lift show; the
+   hand is sized by layoutHand to fit, and #screen-play (overflow:hidden) clips any
+   stray edge so nothing scrolls the page. */
+.hand-dock { min-height: var(--card-h); display: flex; justify-content: center; align-items: flex-end; padding: 6px 8px; overflow: visible; }
 /* Hand overlap is driven by --hand-overlap (set by layoutHand); the fan adds a
    per-card tilt around a pivot below the row + top padding so tilted corners
    have room. Either way the left strip of every card stays exposed so its
