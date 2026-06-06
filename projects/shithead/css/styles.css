@@ -240,8 +240,9 @@ body {
 .hand-count { white-space: nowrap; }
 .badge.done { background: var(--good); color: #06321f; border-radius: 999px; padding: 1px 8px; font-weight: 800; font-size: .78rem; }
 
-/* the row of table cards — face-up lifted over face-down so the hidden card peeks out */
-.player-row-table { position: relative; display: flex; align-items: flex-end; gap: 6px; min-height: var(--card-h); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 2px; }
+/* the row of table cards — face-up lifted over face-down so the hidden card peeks out.
+   min-height includes headroom for that lift, or overflow-y:hidden clips the card top. */
+.player-row-table { position: relative; display: flex; align-items: flex-end; gap: 6px; min-height: calc(var(--card-h) * 1.2); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 2px; }
 .player-row-table::-webkit-scrollbar { display: none; }
 .player-row-table .mini-stack { flex: 0 0 auto; width: var(--card-w); height: var(--card-h); }
 .player-row-table > .card { flex: 0 0 auto; }
