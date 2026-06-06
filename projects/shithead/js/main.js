@@ -15,7 +15,20 @@ import { evaluate, evaluateProgress, emptySummary, achievementById, ACHIEVEMENTS
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const BOT_NAMES = ["Benny", "Ruby", "Coco", "Pip", "Ace", "Domino"];
+// Player-naming conventions shared with Benny: the device owner's name is
+// remembered (prefs.name, captured by the welcome modal, default "Ben"), and
+// opponents draw from a shuffled bot pool so suggested names line up per session.
+const BOT_POOL = ["Roxy", "Kye", "Tim", "Wayne", "Nath", "Sean", "Fiona", "Jon", "Zach"];
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+let DEFAULT_NAMES = [];
+function rebuildDefaultNames() {
+  DEFAULT_NAMES = [((prefs.name || "").trim() || "Ben"), ...shuffled(BOT_POOL)];
+}
+function defaultName(i) { return DEFAULT_NAMES[i] || `Player ${i + 1}`; }
 
 let prefs = storage.loadPrefs();
 let state = null;
@@ -39,6 +52,7 @@ const ui = {
 // ---------------------------------------------------------------- boot
 function boot() {
   applyPrefs();
+  rebuildDefaultNames();
   wireStart();
   wireSettings();
   wireModals();
@@ -51,6 +65,28 @@ function boot() {
   renderVersionStamp();
   setupCardZoom();
   showScreen("screen-start");
+  showWelcomeIfNeeded();
+}
+
+// First-launch name capture (mirrors Benny). Stored under prefs.name and reused
+// everywhere a default player name is suggested.
+function showWelcomeIfNeeded() {
+  if (prefs.name && prefs.name.trim()) return;
+  const modal = $("#modal-welcome");
+  const form = $("#welcome-form");
+  const input = $("#welcome-name");
+  if (!modal || !form) return;
+  modal.hidden = false;
+  setTimeout(() => input.focus(), 0);
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const name = (input.value || "").trim();
+    if (!name) { input.focus(); return; }
+    prefs.name = name; savePrefs();
+    rebuildDefaultNames();
+    modal.hidden = true;
+    renderNames();
+  };
 }
 
 // ---------------------------------------------------------------- card zoom
@@ -190,16 +226,19 @@ function renderNames() {
   host.replaceChildren();
   const n = ui.setup.players;
   if (mode === "cpu") {
-    host.appendChild(nameInput("you", prefs.name || "You", true));
+    host.appendChild(nameInput("you", defaultName(0), true));
+    const bots = [];
+    for (let i = 1; i < n; i++) bots.push(defaultName(i));
     const note = document.createElement("p");
     note.className = "cpu-note";
-    note.textContent = `vs ${n - 1} CPU ${n - 1 === 1 ? "player" : "players"}`;
+    note.textContent = `vs ${bots.join(" & ")}`;
     host.appendChild(note);
   } else {
     for (let i = 0; i < n; i++) {
-      host.appendChild(nameInput("p" + i, (prefs.localNames && prefs.localNames[i]) || `Player ${i + 1}`, true));
+      host.appendChild(nameInput("p" + i, (prefs.localNames && prefs.localNames[i]) || defaultName(i), true));
     }
   }
+  renderDealerSelect();
 }
 function nameInput(key, val, editable) {
   const wrap = document.createElement("label");
@@ -207,6 +246,7 @@ function nameInput(key, val, editable) {
   const input = document.createElement("input");
   input.type = "text"; input.maxLength = 16; input.value = val; input.dataset.key = key;
   if (!editable) input.disabled = true;
+  input.addEventListener("input", renderDealerSelect);
   wrap.appendChild(input);
   return wrap;
 }
@@ -216,11 +256,11 @@ function collectSetup() {
   const names = inputs.map((i) => (i.value.trim() || i.placeholder || "Player"));
   const players = [];
   if (mode === "cpu") {
-    const youName = names[0] || "You";
-    prefs.name = youName; savePrefs();
+    const youName = names[0] || defaultName(0);
+    prefs.name = youName; savePrefs(); DEFAULT_NAMES[0] = youName;   // keep bot order stable
     players.push({ id: "you", name: youName, isCPU: false, difficulty: "normal" });
     for (let i = 1; i < ui.setup.players; i++) {
-      players.push({ id: "cpu" + i, name: BOT_NAMES[i - 1] || ("CPU " + i), isCPU: true, difficulty: ui.setup.difficulty });
+      players.push({ id: "cpu" + i, name: defaultName(i), isCPU: true, difficulty: ui.setup.difficulty });
     }
   } else {
     prefs.localNames = names; savePrefs();
@@ -252,7 +292,8 @@ function onDeal() {
 
 function startNewGame() {
   const { players, options } = collectSetup();
-  state = createState({ players, options });
+  const { dealerId, isRandom } = resolveDealer(players);
+  state = createState({ players, options, forcedStarter: dealerId });
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
@@ -268,11 +309,87 @@ function startNewGame() {
     }
   }
   persist();
-  if (state.phase === "swap") {
-    beginSwapQueue();
+  const proceed = () => { if (state.phase === "swap") beginSwapQueue(); else enterPlay(); };
+  // Dealer spinner: when "Random" was chosen, spin the reel to reveal who opens
+  // before dealing into swap/play; otherwise go straight in.
+  if (isRandom) {
+    const idx = players.findIndex((p) => p.id === dealerId);
+    runReveal(players.map((p) => p.name), Math.max(0, idx), proceed);
   } else {
-    enterPlay();
+    proceed();
   }
+}
+
+// ---------------------------------------------------------------- dealer spinner
+// Read the dealer dropdown into a starter choice: a random spin, the rules'
+// lowest-card opener, or a specific seat.
+function resolveDealer(players) {
+  const sel = $("#dealer-select");
+  const v = sel ? sel.value : "lowest";
+  if (v === "lowest") return { dealerId: null, isRandom: false };
+  if (v === "random") return { dealerId: players[Math.floor(Math.random() * players.length)].id, isRandom: true };
+  const i = parseInt(v.replace("seat-", ""), 10);
+  return { dealerId: players[i] ? players[i].id : null, isRandom: false };
+}
+
+// Suggested/typed names for each seat, in player order (drives the dropdown).
+function currentSetupNames() {
+  const n = ui.setup.players;
+  const inputs = $$("#player-names input");
+  const out = [];
+  if (mode === "cpu") {
+    out.push((inputs[0] && inputs[0].value.trim()) || defaultName(0));
+    for (let i = 1; i < n; i++) out.push(defaultName(i));
+  } else {
+    for (let i = 0; i < n; i++) out.push((inputs[i] && inputs[i].value.trim()) || defaultName(i));
+  }
+  return out;
+}
+
+function renderDealerSelect() {
+  const sel = $("#dealer-select");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.replaceChildren();
+  const add = (val, label) => { const o = document.createElement("option"); o.value = val; o.textContent = label; sel.appendChild(o); };
+  add("random", "🎰 Random (spin)");
+  add("lowest", "Lowest card");
+  currentSetupNames().forEach((nm, i) => add("seat-" + i, nm));
+  sel.value = [...sel.options].some((o) => o.value === prev) ? prev : "random";
+}
+
+// Slot-machine reel that scrolls through the seat names and lands on the
+// opener (ported from Benny). onDone fires when the player taps Continue.
+function runReveal(names, finalIndex, onDone) {
+  const reel = $("#reel");
+  const nameEl = $("#reveal-name");
+  const cont = $("#reveal-continue");
+  showScreen("screen-reveal");
+  cont.hidden = true;
+  nameEl.textContent = "";
+  reel.replaceChildren();
+  const ITEM_H = 56, FRAME_H = 200, cycles = 8;
+  for (let c = 0; c < cycles; c++) for (const n of names) {
+    const d = document.createElement("div"); d.className = "reel-item"; d.textContent = n; reel.appendChild(d);
+  }
+  const targetIdx = (cycles - 2) * names.length + finalIndex;
+  const targetY = targetIdx * ITEM_H + ITEM_H / 2 - FRAME_H / 2;
+  const finish = () => {
+    reel.style.transform = `translateY(${-targetY}px)`;
+    nameEl.textContent = `${names[finalIndex]} starts`;
+    cont.hidden = false;
+    cont.onclick = onDone;
+  };
+  if (prefs.animate === false) { finish(); return; }
+  const duration = 2600, start = performance.now();
+  function frame(t) {
+    const p = Math.min(1, (t - start) / duration);
+    const ease = 1 - Math.pow(1 - p, 3.5);
+    reel.style.transform = `translateY(${-(targetY * ease)}px)`;
+    if (p < 1) requestAnimationFrame(frame);
+    else finish();
+  }
+  requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------- swap phase
@@ -1050,7 +1167,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v12";
+const APP_BUILD = "v13";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1141,11 +1258,15 @@ function sectionTitle(text) {
   return h;
 }
 
-function openStats() {
+const profKey = (name) => String(name || "").trim().toLowerCase();
+const lastSeen = (p) => (p.history && p.history[0] && p.history[0].at) || 0;
+
+// Render one player's stats panel into #stats-body (null → the "nothing yet"
+// placeholder showing everything still to unlock).
+function renderStatsBody(prof) {
   const body = $("#stats-body");
-  const profiles = listProfiles();
   body.replaceChildren();
-  if (!profiles.length) {
+  if (!prof) {
     const note = document.createElement("p");
     note.className = "muted";
     note.textContent = "No games played yet — here's everything there is to unlock:";
@@ -1154,31 +1275,59 @@ function openStats() {
     body.appendChild(achievementsGrid([]));
     body.appendChild(sectionTitle("Lifetime goals"));
     body.appendChild(progressGrid(null));
-  } else {
-    for (const prof of profiles) {
-      const s = prof.stats;
-      const div = document.createElement("div");
-      div.className = "stat-card";
-      div.innerHTML = `<h3>${escapeHtml(prof.name)}</h3>
-        <div class="stat-grid">
-          <span>Games</span><b>${s.games}</b>
-          <span>Wins</span><b>${s.wins}</b>
-          <span>Sh!thead</span><b>${s.shitheads}</b>
-          <span>Best streak</span><b>${s.bestStreak}</b>
-        </div>
-        <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
-      if (prof.history && prof.history.length) {
-        div.appendChild(sectionTitle("Recent games"));
-        div.appendChild(renderSparkline(prof.history));
-      }
-      div.appendChild(sectionTitle("Achievements"));
-      div.appendChild(achievementsGrid(prof.achievements));
-      div.appendChild(sectionTitle("Lifetime goals"));
-      div.appendChild(progressGrid(prof));
-      body.appendChild(div);
-    }
+    return;
   }
+  const s = prof.stats;
+  const div = document.createElement("div");
+  div.className = "stat-card";
+  div.innerHTML = `<div class="stat-grid">
+      <span>Games</span><b>${s.games}</b>
+      <span>Wins</span><b>${s.wins}</b>
+      <span>Sh!thead</span><b>${s.shitheads}</b>
+      <span>Best streak</span><b>${s.bestStreak}</b>
+    </div>
+    <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
+  if (prof.history && prof.history.length) {
+    div.appendChild(sectionTitle("Recent games"));
+    div.appendChild(renderSparkline(prof.history));
+  }
+  div.appendChild(sectionTitle("Achievements"));
+  div.appendChild(achievementsGrid(prof.achievements));
+  div.appendChild(sectionTitle("Lifetime goals"));
+  div.appendChild(progressGrid(prof));
+  body.appendChild(div);
+}
+
+function openStats() {
+  // Most-recently-played first; default to the device owner if they have a record.
+  const profiles = listProfiles().slice().sort((a, b) => lastSeen(b) - lastSeen(a));
+  const field = $("#stats-player-field");
+  const picker = $("#stats-player");
+  if (!profiles.length) {
+    field.hidden = true;
+    renderStatsBody(null);
+    openModal("modal-stats");
+    return;
+  }
+  field.hidden = false;
+  picker.replaceChildren();
+  for (const p of profiles) {
+    const opt = document.createElement("option");
+    opt.value = profKey(p.name);
+    opt.textContent = p.name;
+    picker.appendChild(opt);
+  }
+  const ownerKey = profKey(prefs.name);
+  picker.value = profiles.some((p) => profKey(p.name) === ownerKey) ? ownerKey : profKey(profiles[0].name);
+  renderStatsBody(profiles.find((p) => profKey(p.name) === picker.value) || profiles[0]);
   openModal("modal-stats");
+}
+
+// Re-render when a different player is chosen from the dropdown.
+function onStatsPlayerChange() {
+  const key = $("#stats-player").value;
+  const prof = listProfiles().find((p) => profKey(p.name) === key) || null;
+  renderStatsBody(prof);
 }
 
 // ---------------------------------------------------------------- how to play
@@ -1224,8 +1373,8 @@ function startTutorial() {
   ui.ephemeral = true;                 // a throwaway game — never saved
   mode = "cpu";
   const players = [
-    { id: "you", name: prefs.name || "You", isCPU: false, difficulty: "normal" },
-    { id: "cpu1", name: "Benny", isCPU: true, difficulty: "easy" },
+    { id: "you", name: defaultName(0), isCPU: false, difficulty: "normal" },
+    { id: "cpu1", name: "Coach", isCPU: true, difficulty: "easy" },
   ];
   const options = {
     swapPhase: false, jokers: false, sevenPower: false, eightMode: "reverse",
@@ -1328,8 +1477,9 @@ function renderTourOffer() {
 // ---------------------------------------------------------------- modals
 function wireModals() {
   $$("[data-close-modal]").forEach((b) => b.addEventListener("click", closeModals));
-  $$(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) closeModals(); }));
+  $$(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m && m.id !== "modal-welcome") closeModals(); }));
   $("#confirm-cancel").addEventListener("click", closeModals);
+  $("#stats-player").addEventListener("change", onStatsPlayerChange);
 }
 function openModal(id) { $("#" + id).hidden = false; }
 function closeModals() { $$(".modal").forEach((m) => m.hidden = true); }

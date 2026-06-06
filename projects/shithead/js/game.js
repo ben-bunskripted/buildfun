@@ -38,7 +38,7 @@ export function deserialize(obj) { return obj; }
 
 // ---------- Setup ----------
 
-export function createState({ players, options = {}, shuffle } = {}) {
+export function createState({ players, options = {}, shuffle, forcedStarter = null } = {}) {
   const opts = { ...defaultOptions(), ...options };
   const deck = buildDeck(opts);
   (shuffle || shuffleInPlace)(deck);
@@ -80,6 +80,9 @@ export function createState({ players, options = {}, shuffle } = {}) {
     // to hold because they picked up a (publicly visible) pile. Pruned as they
     // shed those cards. Public information — fair game for a card-counter.
     memory: {},
+    // When set (a player id, e.g. from the dealer spinner) this player opens the
+    // round; otherwise the rules' lowest-card holder does.
+    forcedStarter: forcedStarter || null,
     lastEvent: null,
     shitheadId: null,
     finishOrder: [],
@@ -96,17 +99,23 @@ function starterValue(rank) {
 }
 
 function beginPlay(state) {
-  let bestIdx = 0, bestVal = Infinity, bestSuit = 99;
-  state.players.forEach((p, i) => {
-    for (const c of p.hand) {
-      const v = starterValue(c.rank);
-      const so = SUIT_ORDER[c.suit];
-      if (v < bestVal || (v === bestVal && so < bestSuit)) {
-        bestVal = v; bestSuit = so; bestIdx = i;
+  const forced = state.forcedStarter != null
+    ? state.players.findIndex((p) => p.id === state.forcedStarter) : -1;
+  if (forced >= 0) {
+    state.current = forced;
+  } else {
+    let bestIdx = 0, bestVal = Infinity, bestSuit = 99;
+    state.players.forEach((p, i) => {
+      for (const c of p.hand) {
+        const v = starterValue(c.rank);
+        const so = SUIT_ORDER[c.suit];
+        if (v < bestVal || (v === bestVal && so < bestSuit)) {
+          bestVal = v; bestSuit = so; bestIdx = i;
+        }
       }
-    }
-  });
-  state.current = bestIdx;
+    });
+    state.current = bestIdx;
+  }
   state.phase = "play";
   state.started = true;
 }
