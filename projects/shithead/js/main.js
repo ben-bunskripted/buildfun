@@ -40,6 +40,7 @@ const ui = {
   selected: [],     // selected card ids in hand/face-up
   summaries: {},    // per-human achievement tally
   handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
+  faceUpSlots: {},  // per-player stable slot order for face-up cards, so taking one leaves a gap
   pendingHandRender: false, // a hand rebuild deferred because a drag is live
   toastedAch: new Set(),    // achievements already toasted this match
   tutorialActive: false,    // a guided tutorial is running (pauses the CPUs)
@@ -297,6 +298,7 @@ function startNewGame() {
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
+  ui.faceUpSlots = {};
   ui.toastedAch = new Set();
   ui.ephemeral = false;
   ui.summaries = {};
@@ -706,24 +708,31 @@ function renderPlayerTable(p, o = {}) {
     if (o.takeActive) { up.classList.add("takeable"); up.addEventListener("click", () => onTakeFaceUp(id)); }
     else if (o.deflectActive) { up.classList.add("selectable"); bindSelect(up, id, "faceUp", o.summ); if (ui.selected.includes(id)) up.classList.add("selected"); }
   };
-  for (let i = 0; i < p.faceDown.length; i++) {
-    const stack = document.createElement("div");
-    stack.className = "mini-stack";
-    const back = renderCardBack({ className: o.blindActive ? "selectable blind" : "" });
-    if (o.blindActive) back.addEventListener("click", () => onBlindFlip(p.faceDown[i].id));
-    stack.appendChild(back);
-    if (p.faceUp[i]) {
-      const up = renderCard(p.faceUp[i], { className: "on-top" });
-      wireUp(up, p.faceUp[i].id);
-      stack.appendChild(up);
+  // Stable slot order: face-up cards keep their original column, so taking one
+  // into hand leaves a gap (the face-down back) rather than shuffling the rest left.
+  const slots = stableFaceUpSlots(p);
+  const faceUpById = new Map(p.faceUp.map((c) => [c.id, c]));
+  const slotCount = Math.max(p.faceDown.length, slots.length);
+  for (let i = 0; i < slotCount; i++) {
+    const upCard = faceUpById.get(slots[i]);   // the card originally in this slot, if still here
+    if (i < p.faceDown.length) {
+      const stack = document.createElement("div");
+      stack.className = "mini-stack";
+      const back = renderCardBack({ className: o.blindActive ? "selectable blind" : "" });
+      if (o.blindActive) back.addEventListener("click", () => onBlindFlip(p.faceDown[i].id));
+      stack.appendChild(back);
+      if (upCard) {
+        const up = renderCard(upCard, { className: "on-top" });
+        wireUp(up, upCard.id);
+        stack.appendChild(up);
+      }
+      host.appendChild(stack);
+    } else if (upCard) {
+      // a face-up with no face-down beneath it (shouldn't normally happen)
+      const up = renderCard(upCard, {});
+      wireUp(up, upCard.id);
+      host.appendChild(up);
     }
-    host.appendChild(stack);
-  }
-  // any face-up beyond the face-down count (no card hidden under these)
-  for (let i = p.faceDown.length; i < p.faceUp.length; i++) {
-    const up = renderCard(p.faceUp[i], {});
-    wireUp(up, p.faceUp[i].id);
-    host.appendChild(up);
   }
   if (!p.faceDown.length && !p.faceUp.length) {
     const none = document.createElement("span");
@@ -731,6 +740,19 @@ function renderPlayerTable(p, o = {}) {
     host.appendChild(none);
   }
   return host;
+}
+
+// Per-player face-up slot order, captured once and kept stable as cards are
+// taken (they only ever leave), so columns don't reflow. Re-seeds if a new card
+// id appears (e.g. a fresh deal after the map was cleared).
+function stableFaceUpSlots(p) {
+  const ids = p.faceUp.map((c) => c.id);
+  let order = ui.faceUpSlots[p.id];
+  if (!order || ids.some((id) => !order.includes(id))) {
+    order = ids.slice();
+    ui.faceUpSlots[p.id] = order;
+  }
+  return order;
 }
 
 // Gold edge hint when a row's cards overflow horizontally and can be scrolled.
@@ -1132,6 +1154,7 @@ function onResume() {
   for (const id of ui.humans) if (!ui.summaries[id]) ui.summaries[id] = { ...emptySummary(), total: state.players.length };
   ui.selected = [];
   ui.handOrders = {};
+  ui.faceUpSlots = {};
   ui.toastedAch = new Set();
   ui.ephemeral = false;
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
@@ -1186,7 +1209,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v19";
+const APP_BUILD = "v20";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1402,7 +1425,7 @@ function startTutorial() {
   state = createState({ players, options });
   state.current = 0;                   // make it the human's turn so the controls show
   ui.humans = ["you"]; ui.humanId = "you";
-  ui.handOrders = {}; ui.toastedAch = new Set();
+  ui.handOrders = {}; ui.faceUpSlots = {}; ui.toastedAch = new Set();
   ui.summaries = { you: { ...emptySummary(), difficulty: "easy", total: 2 } };
   enterPlay();                         // CPUs are gated by ui.tutorialActive
   coachStep(0);
