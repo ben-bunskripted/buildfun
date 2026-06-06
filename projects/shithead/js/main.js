@@ -46,7 +46,48 @@ function boot() {
   renderHowto();
   renderSaved();
   renderVersionStamp();
+  setupCardZoom();
   showScreen("screen-start");
+}
+
+// ---------------------------------------------------------------- card zoom
+// Hover (desktop) or long-press (touch) a table card — the discard top, an
+// opponent's face-up, your own face-ups — to see an enlarged copy. Hand cards
+// and face-down backs are excluded (already legible / nothing to reveal).
+function setupCardZoom() {
+  let zoom = null, timer = null;
+  const hide = () => { if (zoom) { zoom.remove(); zoom = null; } };
+  function zoomable(target) {
+    const card = target && target.closest && target.closest(".card");
+    if (!card || !card.closest("#screen-play")) return null;
+    if (["in-hand", "back", "dragging", "drag-placeholder"].some((c) => card.classList.contains(c))) return null;
+    return card;
+  }
+  function show(card) {
+    hide();
+    const clone = card.cloneNode(true);
+    // Keep "card" + render-mode classes so the classic corner/pip CSS still
+    // styles it; drop interactive/positioning classes from the table.
+    const keep = [...card.classList].filter((c) => ["card", "is-modern", "joker"].includes(c) || c.startsWith("suit-"));
+    clone.className = "zoom-card " + keep.join(" ");
+    clone.style.cssText = "";
+    const wrap = document.createElement("div");
+    wrap.className = "card-zoom";
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+    zoom = wrap;
+  }
+  document.addEventListener("mouseover", (e) => { const c = zoomable(e.target); if (c) show(c); });
+  document.addEventListener("mouseout", (e) => { if (zoomable(e.target)) hide(); });
+  document.addEventListener("touchstart", (e) => {
+    const c = zoomable(e.target);
+    if (!c) return;
+    timer = setTimeout(() => show(c), 380);
+  }, { passive: true });
+  const cancel = () => { clearTimeout(timer); hide(); };
+  document.addEventListener("touchend", cancel);
+  document.addEventListener("touchmove", cancel);
+  document.addEventListener("touchcancel", cancel);
 }
 
 function applyPrefs() {
@@ -340,8 +381,54 @@ function doAction(action) {
   maybeToastAchievements();
   persist();
   renderPlay();
+  animateEvent(state.lastEvent);
   const wait = prefs.animate !== false ? 360 : 30;
   ui.cpuTimer = setTimeout(scheduleTurn, wait);
+}
+
+// ---------------------------------------------------------------- table effects
+// Fire transient feedback for the action that just resolved: the played card
+// drops onto the pile, burns flash, pickups sweep, and 8-reverse / jokers pop a
+// floating label. Driven from doAction so each effect plays exactly once.
+function animateEvent(e) {
+  if (!e || prefs.animate === false) return;
+  const dz = $("#discard-zone");
+  if (e.type === "play") {
+    if (e.burned) {
+      flashCenter("burn");
+      const bz = $("#burned-zone");
+      if (bz) { bz.classList.remove("pulse"); void bz.offsetWidth; bz.classList.add("pulse"); }
+    } else if (dz) {
+      const cards = dz.querySelectorAll(".discard-card");      // a .pile-count badge sits last, so take the last card explicitly
+      const top = cards[cards.length - 1];
+      if (top) { top.classList.remove("drop-in"); void top.offsetWidth; top.classList.add("drop-in"); }
+    }
+    if (e.joker) floatLabel("🃏 Joker!");
+    else if (e.deflect) floatLabel("3 — deflected!");
+    else if (e.rank === "8" && state.options.eightMode === "reverse" && !e.burned) floatLabel("Reverse ↺");
+    else if (e.rank === "2" && state.options.twoPower && !e.burned) floatLabel("Reset");
+  } else if (e.type === "pickup" || e.type === "blindFail") {
+    flashCenter("pickup");
+    if (e.count) floatLabel(`Picked up ${e.count}`);
+  }
+}
+
+function flashCenter(kind) {
+  const ct = $("#center-table");
+  if (!ct) return;
+  const fx = document.createElement("div");
+  fx.className = "center-fx fx-" + kind;
+  ct.appendChild(fx);
+  setTimeout(() => fx.remove(), 700);
+}
+function floatLabel(text) {
+  const ct = $("#center-table");
+  if (!ct) return;
+  const el = document.createElement("div");
+  el.className = "float-label";
+  el.textContent = text;
+  ct.appendChild(el);
+  setTimeout(() => el.remove(), 1100);
 }
 
 // Achievements that can be settled mid-game (no dependence on final place /
@@ -907,7 +994,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v7";
+const APP_BUILD = "v8";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
