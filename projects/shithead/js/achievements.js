@@ -17,8 +17,28 @@ export const ACHIEVEMENTS = [
   { id: "table_for_four", icon: "🪑", name: "Table for Four", desc: "Win a 4-player game.", test: (s) => s.place === 1 && s.total === 4 },
 ];
 
-const BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
+// Lifetime "progress" achievements — fill a bar over many games. `value(prof)`
+// reads the player's accumulated stats/progress (see profiles.accrueProgress).
+export const PROGRESS_ACHIEVEMENTS = [
+  { id: "veteran", icon: "🎖️", name: "Veteran", desc: "Play 25 games.", target: 25, value: (p) => p.stats.games },
+  { id: "champion", icon: "👑", name: "Champion", desc: "Win 10 games.", target: 10, value: (p) => p.stats.wins },
+  { id: "arsonist", icon: "🔥", name: "Arsonist", desc: "Burn the pile 50 times.", target: 50, value: (p) => p.progress.burns },
+  { id: "court_jester", icon: "🃏", name: "Court Jester", desc: "Drop 15 jokers on opponents.", target: 15, value: (p) => p.progress.jokers },
+  { id: "hot_streak", icon: "🌶️", name: "Hot Streak", desc: "Win 3 games in a row.", target: 3, value: (p) => p.stats.bestStreak },
+];
+
+const BY_ID = new Map([...ACHIEVEMENTS, ...PROGRESS_ACHIEVEMENTS].map((a) => [a.id, a]));
 export function achievementById(id) { return BY_ID.get(id); }
+
+// Per-profile progress snapshot: [{ def, value, target, unlocked }] clamped.
+export function evaluateProgress(profile) {
+  return PROGRESS_ACHIEVEMENTS.map((def) => {
+    let value = 0;
+    try { value = def.value(profile) || 0; } catch (_) { value = 0; }
+    value = Math.max(0, Math.min(def.target, value));
+    return { def, value, target: def.target, unlocked: value >= def.target };
+  });
+}
 
 export function emptySummary() {
   return {

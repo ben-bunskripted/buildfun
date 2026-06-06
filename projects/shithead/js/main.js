@@ -9,8 +9,8 @@ import {
 import { comparisonCard, requirement, SUIT_GLYPH, value } from "./rules.js";
 import { planTurn, planSwaps } from "./ai.js";
 import * as storage from "./storage.js";
-import { recordMatch, addAchievements, getProfile, listProfiles } from "./profiles.js";
-import { evaluate, emptySummary, achievementById, ACHIEVEMENTS } from "./achievements.js";
+import { recordMatch, addAchievements, accrueProgress, getProfile, listProfiles } from "./profiles.js";
+import { evaluate, evaluateProgress, emptySummary, achievementById, ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS } from "./achievements.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -28,6 +28,9 @@ const ui = {
   summaries: {},    // per-human achievement tally
   handOrders: {},   // per-viewer manual hand order (from drag-reorder), by id
   pendingHandRender: false, // a hand rebuild deferred because a drag is live
+  toastedAch: new Set(),    // achievements already toasted this match
+  tutorialActive: false,    // a guided tutorial is running (pauses the CPUs)
+  ephemeral: false,         // practice game — don't write it to a save slot
   cpuTimer: null,
   busy: false,      // an action animation is in flight
   setup: { players: 3, difficulty: "normal", eightMode: "reverse", two: true, ten: true, seven: false, jokers: false, swap: true, fourkind: true, replay: true },
@@ -44,8 +47,50 @@ function boot() {
   wireOver();
   renderHowto();
   renderSaved();
+  renderTourOffer();
   renderVersionStamp();
+  setupCardZoom();
   showScreen("screen-start");
+}
+
+// ---------------------------------------------------------------- card zoom
+// Hover (desktop) or long-press (touch) a table card — the discard top, an
+// opponent's face-up, your own face-ups — to see an enlarged copy. Hand cards
+// and face-down backs are excluded (already legible / nothing to reveal).
+function setupCardZoom() {
+  let zoom = null, timer = null;
+  const hide = () => { if (zoom) { zoom.remove(); zoom = null; } };
+  function zoomable(target) {
+    const card = target && target.closest && target.closest(".card");
+    if (!card || !card.closest("#screen-play")) return null;
+    if (["in-hand", "back", "dragging", "drag-placeholder"].some((c) => card.classList.contains(c))) return null;
+    return card;
+  }
+  function show(card) {
+    hide();
+    const clone = card.cloneNode(true);
+    // Keep "card" + render-mode classes so the classic corner/pip CSS still
+    // styles it; drop interactive/positioning classes from the table.
+    const keep = [...card.classList].filter((c) => ["card", "is-modern", "joker"].includes(c) || c.startsWith("suit-"));
+    clone.className = "zoom-card " + keep.join(" ");
+    clone.style.cssText = "";
+    const wrap = document.createElement("div");
+    wrap.className = "card-zoom";
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+    zoom = wrap;
+  }
+  document.addEventListener("mouseover", (e) => { const c = zoomable(e.target); if (c) show(c); });
+  document.addEventListener("mouseout", (e) => { if (zoomable(e.target)) hide(); });
+  document.addEventListener("touchstart", (e) => {
+    const c = zoomable(e.target);
+    if (!c) return;
+    timer = setTimeout(() => show(c), 380);
+  }, { passive: true });
+  const cancel = () => { clearTimeout(timer); hide(); };
+  document.addEventListener("touchend", cancel);
+  document.addEventListener("touchmove", cancel);
+  document.addEventListener("touchcancel", cancel);
 }
 
 function applyPrefs() {
@@ -116,6 +161,9 @@ function wireStart() {
   $("#howto-link").addEventListener("click", () => openModal("modal-howto"));
   $("#settings-link").addEventListener("click", () => openModal("modal-settings"));
   $("#stats-btn").addEventListener("click", openStats);
+  $("#tour-btn").addEventListener("click", startTutorial);
+  $("#tour-dismiss").addEventListener("click", () => { prefs.tutorialDone = true; savePrefs(); renderTourOffer(); });
+  $("#howto-tour").addEventListener("click", startTutorial);
 
   // Saved-games section: per-row Resume / Discard.
   $("#saved-list").addEventListener("click", (e) => {
@@ -202,6 +250,8 @@ function startNewGame() {
   ui.humans = players.filter((p) => !p.isCPU).map((p) => p.id);
   ui.humanId = ui.humans[0];
   ui.handOrders = {};
+  ui.toastedAch = new Set();
+  ui.ephemeral = false;
   ui.summaries = {};
   for (const id of ui.humans) ui.summaries[id] = { ...emptySummary(), difficulty: ui.setup.difficulty, eightMode: options.eightMode, total: players.length };
   // CPUs auto-swap + ready up front.
@@ -318,6 +368,7 @@ function scheduleTurn() {
 
   if (cur.isCPU) {
     renderPlay();
+    if (ui.tutorialActive) return;     // hold the bots while the coach is talking
     const delay = prefs.animate !== false ? 520 + Math.floor(Math.random() * 380) : 30;
     ui.cpuTimer = setTimeout(() => doAction(planTurn(state)), delay);
     return;
@@ -335,10 +386,74 @@ function scheduleTurn() {
 function doAction(action) {
   applyAction(state, action);
   trackEvent();
+  maybeToastAchievements();
   persist();
   renderPlay();
+  animateEvent(state.lastEvent);
   const wait = prefs.animate !== false ? 360 : 30;
   ui.cpuTimer = setTimeout(scheduleTurn, wait);
+}
+
+// ---------------------------------------------------------------- table effects
+// Fire transient feedback for the action that just resolved: the played card
+// drops onto the pile, burns flash, pickups sweep, and 8-reverse / jokers pop a
+// floating label. Driven from doAction so each effect plays exactly once.
+function animateEvent(e) {
+  if (!e || prefs.animate === false) return;
+  const dz = $("#discard-zone");
+  if (e.type === "play") {
+    if (e.burned) {
+      flashCenter("burn");
+      const bz = $("#burned-zone");
+      if (bz) { bz.classList.remove("pulse"); void bz.offsetWidth; bz.classList.add("pulse"); }
+    } else if (dz) {
+      const cards = dz.querySelectorAll(".discard-card");      // a .pile-count badge sits last, so take the last card explicitly
+      const top = cards[cards.length - 1];
+      if (top) { top.classList.remove("drop-in"); void top.offsetWidth; top.classList.add("drop-in"); }
+    }
+    if (e.joker) floatLabel("🃏 Joker!");
+    else if (e.deflect) floatLabel("3 — deflected!");
+    else if (e.rank === "8" && state.options.eightMode === "reverse" && !e.burned) floatLabel("Reverse ↺");
+    else if (e.rank === "2" && state.options.twoPower && !e.burned) floatLabel("Reset");
+  } else if (e.type === "pickup" || e.type === "blindFail") {
+    flashCenter("pickup");
+    if (e.count) floatLabel(`Picked up ${e.count}`);
+  }
+}
+
+function flashCenter(kind) {
+  const ct = $("#center-table");
+  if (!ct) return;
+  const fx = document.createElement("div");
+  fx.className = "center-fx fx-" + kind;
+  ct.appendChild(fx);
+  setTimeout(() => fx.remove(), 700);
+}
+function floatLabel(text) {
+  const ct = $("#center-table");
+  if (!ct) return;
+  const el = document.createElement("div");
+  el.className = "float-label";
+  el.textContent = text;
+  ct.appendChild(el);
+  setTimeout(() => el.remove(), 1100);
+}
+
+// Achievements that can be settled mid-game (no dependence on final place /
+// Sh!thead status) — toast them the moment they're earned for instant feedback.
+const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing"]);
+function maybeToastAchievements() {
+  const e = state && state.lastEvent;
+  if (!e || !e.playerId) return;
+  const s = ui.summaries[e.playerId];   // only tracked humans have a summary
+  if (!s) return;
+  const have = new Set(getProfile(byId(e.playerId).name).achievements);
+  for (const id of evaluate(s)) {
+    if (!LIVE_ACH.has(id) || have.has(id) || ui.toastedAch.has(id)) continue;
+    ui.toastedAch.add(id);
+    const a = achievementById(id);
+    if (a) toast(`🏆 ${a.icon || ""} ${a.name} unlocked!`);
+  }
 }
 
 function fastForward() {
@@ -758,6 +873,7 @@ function endMatch() {
     recordMatch(p.name, { place: p.place, isShithead: isShit, total, mode });
     const s = ui.summaries[id];
     s.place = p.place; s.isShithead = isShit; s.total = total;
+    accrueProgress(p.name, s);
     const earnedIds = evaluate(s);
     const fresh = addAchievements(p.name, earnedIds);
     if (fresh.length && (mode === "cpu" || id === ui.viewerId || ui.humans.length === 1)) {
@@ -783,7 +899,7 @@ function wireOver() {
 
 // ---------------------------------------------------------------- persistence / resume
 function persist() {
-  if (!state) return;
+  if (!state || ui.ephemeral) return;   // practice/tutorial games aren't saved
   storage.save({ mode, state: serialize(state), ui: { humanId: ui.humanId, humans: ui.humans, viewerId: ui.viewerId, summaries: ui.summaries } });
 }
 
@@ -833,6 +949,8 @@ function onResume() {
   for (const id of ui.humans) if (!ui.summaries[id]) ui.summaries[id] = { ...emptySummary(), total: state.players.length };
   ui.selected = [];
   ui.handOrders = {};
+  ui.toastedAch = new Set();
+  ui.ephemeral = false;
   if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
@@ -885,7 +1003,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v6";
+const APP_BUILD = "v9";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -930,6 +1048,52 @@ function achievementsGrid(unlockedIds) {
   return grid;
 }
 
+// A lifetime "goal" tile with a progress bar.
+function renderProgressCard(item) {
+  const { def, value, target, unlocked } = item;
+  const pct = Math.round((value / target) * 100);
+  const el = document.createElement("div");
+  el.className = `achievement-card has-progress ${unlocked ? "is-unlocked" : ""}`;
+  el.innerHTML =
+    `<div class="achievement-icon" aria-hidden="true">${def.icon || "🏆"}</div>` +
+    `<div class="achievement-info">` +
+    `<div class="achievement-name">${escapeHtml(def.name)}</div>` +
+    `<div class="achievement-desc">${escapeHtml(def.desc)}</div>` +
+    `<div class="ach-progress"><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${pct}%"></div></div>` +
+    `<span class="ach-progress-label">${value} / ${target}</span></div></div>`;
+  return el;
+}
+function progressGrid(profile) {
+  const grid = document.createElement("div");
+  grid.className = "achievements-grid";
+  const items = profile ? evaluateProgress(profile)
+    : PROGRESS_ACHIEVEMENTS.map((def) => ({ def, value: 0, target: def.target, unlocked: false }));
+  for (const item of items) grid.appendChild(renderProgressCard(item));
+  return grid;
+}
+
+// Recent-results sparkline: one bar per game, taller = better finish, coloured
+// gold (win) / grey (mid) / red (Sh!thead). Newest on the right.
+function renderSparkline(history) {
+  const games = (history || []).slice(0, 18).reverse();
+  const wrap = document.createElement("div");
+  wrap.className = "spark";
+  for (const g of games) {
+    const perf = g.total > 1 ? (g.total - g.place) / (g.total - 1) : (g.place === 1 ? 1 : 0);
+    const bar = document.createElement("span");
+    bar.className = "spark-bar " + (g.isShithead ? "shit" : g.place === 1 ? "win" : "mid");
+    bar.style.height = `${Math.round(8 + perf * 26)}px`;
+    bar.title = g.isShithead ? "Sh!thead" : `#${g.place} of ${g.total}`;
+    wrap.appendChild(bar);
+  }
+  return wrap;
+}
+function sectionTitle(text) {
+  const h = document.createElement("div");
+  h.className = "ach-section-title"; h.textContent = text;
+  return h;
+}
+
 function openStats() {
   const body = $("#stats-body");
   const profiles = listProfiles();
@@ -939,7 +1103,10 @@ function openStats() {
     note.className = "muted";
     note.textContent = "No games played yet — here's everything there is to unlock:";
     body.appendChild(note);
+    body.appendChild(sectionTitle("Achievements"));
     body.appendChild(achievementsGrid([]));
+    body.appendChild(sectionTitle("Lifetime goals"));
+    body.appendChild(progressGrid(null));
   } else {
     for (const prof of profiles) {
       const s = prof.stats;
@@ -953,7 +1120,14 @@ function openStats() {
           <span>Best streak</span><b>${s.bestStreak}</b>
         </div>
         <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
+      if (prof.history && prof.history.length) {
+        div.appendChild(sectionTitle("Recent games"));
+        div.appendChild(renderSparkline(prof.history));
+      }
+      div.appendChild(sectionTitle("Achievements"));
       div.appendChild(achievementsGrid(prof.achievements));
+      div.appendChild(sectionTitle("Lifetime goals"));
+      div.appendChild(progressGrid(prof));
       body.appendChild(div);
     }
   }
@@ -976,6 +1150,129 @@ function renderHowto() {
       <li><b>Four of a kind</b> on the pile burns it — same as a 10.</li>
     </ul>
     <p><b>Endgame:</b> once your hand is empty, play your 3 face-up cards. Then play your 3 face-down cards <b>blind</b> — flip one; if it beats the pile it stays, otherwise you take the pile.</p>`;
+}
+
+// ---------------------------------------------------------------- tutorial
+// A guided coach overlay running on a throwaway practice game (vs one easy
+// bot). The bots are paused while the coach talks; each step spotlights a real
+// UI element with a short explanation. Nothing is scripted — when it ends, the
+// practice game is yours to play.
+const TUTORIAL_STEPS = [
+  { target: null, title: "Welcome to Sh!thead!", body: "The goal: be the first to get rid of all your cards. Whoever's left holding cards is the Sh!thead." },
+  { target: "#you-hand", title: "Your hand", body: "These are your cards. On your turn, play a card equal to or higher than the top of the pile — or several of the same number at once." },
+  { target: "#discard-zone", title: "The pile", body: "Play onto the pile here: tap a card then Play, or just drag a card onto the pile. The next player has to beat your top card." },
+  { target: "#deck-stack", title: "Draw pile", body: "After playing from your hand you draw back up to three cards — while the deck lasts. So your hand stays at three until it runs out." },
+  { target: "#pickup-btn", title: "Stuck?", body: "Can't (or don't want to) play? Pick up the whole pile into your hand — then it's the next player's go." },
+  { target: null, title: "Power cards", body: "Look out for power cards: 2 resets the pile, 10 burns it, 7 forces a low play, 8 reverses the order, and a Joker makes the next player scoop everything. Toggle them in House rules." },
+  { target: "#you-facedown", title: "The endgame", body: "When your hand is empty, play your three face-up cards. Then the three face-down cards are played blind — flip one and hope it beats the pile!" },
+  { target: null, title: "You're ready!", body: "That's the gist. This is a practice game against an easy bot — have a go. Good luck, and don't be the Sh!thead!" },
+];
+
+let coachEl = null, coachIdx = 0;
+
+function startTutorial() {
+  closeModals();
+  hideBanner();
+  ui.tutorialActive = true;
+  ui.ephemeral = true;                 // a throwaway game — never saved
+  mode = "cpu";
+  const players = [
+    { id: "you", name: prefs.name || "You", isCPU: false, difficulty: "normal" },
+    { id: "cpu1", name: "Benny", isCPU: true, difficulty: "easy" },
+  ];
+  const options = {
+    swapPhase: false, jokers: false, sevenPower: false, eightMode: "reverse",
+    twoPower: true, tenPower: true, fourKindAcrossTurns: true, replayOnBurn: true,
+  };
+  state = createState({ players, options });
+  state.current = 0;                   // make it the human's turn so the controls show
+  ui.humans = ["you"]; ui.humanId = "you";
+  ui.handOrders = {}; ui.toastedAch = new Set();
+  ui.summaries = { you: { ...emptySummary(), difficulty: "easy", total: 2 } };
+  enterPlay();                         // CPUs are gated by ui.tutorialActive
+  coachStep(0);
+}
+
+function buildCoach() {
+  coachEl = document.createElement("div");
+  coachEl.id = "coach";
+  coachEl.innerHTML =
+    `<div class="coach-block"></div>` +
+    `<div class="coach-spot"></div>` +
+    `<div class="coach-balloon"><div class="coach-step"></div>` +
+    `<div class="coach-title"></div><div class="coach-body"></div>` +
+    `<div class="coach-actions"><button class="link coach-skip">Skip tour</button>` +
+    `<button class="btn primary coach-next">Next</button></div></div>`;
+  document.body.appendChild(coachEl);
+  coachEl.querySelector(".coach-next").addEventListener("click", () => {
+    if (coachIdx >= TUTORIAL_STEPS.length - 1) endTutorial();
+    else coachStep(coachIdx + 1);
+  });
+  coachEl.querySelector(".coach-skip").addEventListener("click", skipTutorial);
+}
+
+function coachStep(i) {
+  coachIdx = i;
+  if (!coachEl) buildCoach();
+  const step = TUTORIAL_STEPS[i];
+  const last = i === TUTORIAL_STEPS.length - 1;
+  const spot = coachEl.querySelector(".coach-spot");
+  const balloon = coachEl.querySelector(".coach-balloon");
+  coachEl.querySelector(".coach-step").textContent = `Step ${i + 1} of ${TUTORIAL_STEPS.length}`;
+  coachEl.querySelector(".coach-title").textContent = step.title;
+  coachEl.querySelector(".coach-body").textContent = step.body;
+  coachEl.querySelector(".coach-next").textContent = last ? "Let's play!" : "Next";
+
+  const tgt = step.target ? $(step.target) : null;
+  const r = tgt && tgt.getBoundingClientRect ? tgt.getBoundingClientRect() : null;
+  if (r && r.width > 0 && r.height > 0) {
+    const pad = 8;
+    spot.style.display = "block";
+    spot.style.left = `${r.left - pad}px`;
+    spot.style.top = `${r.top - pad}px`;
+    spot.style.width = `${r.width + pad * 2}px`;
+    spot.style.height = `${r.height + pad * 2}px`;
+    balloon.classList.remove("vcenter");
+    if (r.top < window.innerHeight * 0.5) {
+      balloon.style.top = `${Math.min(r.bottom + 14, window.innerHeight - 200)}px`;
+      balloon.style.bottom = "auto";
+    } else {
+      balloon.style.bottom = `${window.innerHeight - r.top + 14}px`;
+      balloon.style.top = "auto";
+    }
+  } else {
+    spot.style.display = "none";
+    balloon.classList.add("vcenter");
+    balloon.style.top = ""; balloon.style.bottom = "";
+  }
+}
+
+function removeCoach() { if (coachEl) { coachEl.remove(); coachEl = null; } }
+
+function endTutorial() {
+  ui.tutorialActive = false;
+  prefs.tutorialDone = true; savePrefs();
+  removeCoach();
+  renderTourOffer();
+  if (state && state.phase === "play") scheduleTurn();   // hand control back / wake the bot
+}
+
+function skipTutorial() {
+  ui.tutorialActive = false;
+  ui.ephemeral = false;
+  prefs.tutorialDone = true; savePrefs();
+  removeCoach();
+  clearTimeout(ui.cpuTimer);
+  state = null;
+  renderTourOffer();
+  renderSaved();
+  showScreen("screen-start");
+}
+
+// First-run "take the tour" offer on the home screen.
+function renderTourOffer() {
+  const offer = $("#tour-offer");
+  if (offer) offer.hidden = !!prefs.tutorialDone;
 }
 
 // ---------------------------------------------------------------- modals
