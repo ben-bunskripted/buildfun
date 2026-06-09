@@ -119,6 +119,20 @@ function priorAchievementsInMode(profile, mode) {
   if (!profile) return 0;
   return profile.achievements.filter(a => a.matchContext && a.matchContext.mode === mode).length;
 }
+// Leading (most-recent-first) match wins in a mode. The current match isn't in
+// matchHistory yet at evaluate time, so this counts the unbroken run of wins
+// immediately preceding it (other modes' entries are skipped, not counted).
+// Used by On a Roll.
+function leadingWinsInMode(profile, mode) {
+  if (!profile) return 0;
+  let n = 0;
+  for (const m of profile.matchHistory) {
+    if (m.mode !== mode) continue;
+    if (m.position === 1) n += 1;
+    else break;
+  }
+  return n;
+}
 
 export const ACHIEVEMENTS = [
   // ---- Score-based (any mode) ----
@@ -324,6 +338,83 @@ export const ACHIEVEMENTS = [
     description: "Unlock 10 unique achievements in this mode.",
     // Counts prior unlocks IN THIS MODE; +1 implicit for this one = 10.
     evaluate: ({ summary, profile }) => priorAchievementsInMode(profile, summary.mode) >= 9,
+  },
+
+  // ---- Round dominance (any mode — roundHistory is populated in scoring too) ----
+  {
+    id: "clean_sweep", name: "Clean Sweep", icon: "🧹", category: "round", modes: ALL_MODES,
+    description: "Win every round in a match (3+ rounds).",
+    evaluate: ({ player, summary }) => {
+      const rounds = summary.roundHistory.length;
+      return rounds >= 3 && roundsWonByPlayer(summary.roundHistory, player.idx) === rounds;
+    },
+  },
+  {
+    id: "magnificent_seven", name: "Magnificent Seven", icon: "🤠", category: "round", modes: ALL_MODES,
+    description: "Win 7 rounds in a single match.",
+    evaluate: ({ player, summary }) => roundsWonByPlayer(summary.roundHistory, player.idx) >= 7,
+  },
+  {
+    id: "unstoppable", name: "Unstoppable", icon: "🚀", category: "round", modes: ALL_MODES,
+    description: "Win 5 rounds in a row in one match.",
+    evaluate: ({ player, summary }) => maxConsecutiveRoundWins(summary.roundHistory, player.idx) >= 5,
+  },
+  {
+    id: "opening_act", name: "Opening Act", icon: "🎬", category: "round", modes: PLAY_MODES,
+    description: "Be first to open in 5 rounds of a single match.",
+    evaluate: ({ player, summary }) => {
+      if (!isCardDetailMode(summary)) return false;
+      let n = 0;
+      for (const r of summary.matchEvents.rounds) {
+        if (r.openedOrder && r.openedOrder[0] === player.idx) n += 1;
+      }
+      return n >= 5;
+    },
+  },
+
+  // ---- Card-play feats ----
+  {
+    id: "wild_thing", name: "Wild Thing", icon: "🌪️", category: "card", modes: PLAY_MODES,
+    description: "Go out in a round with 3+ wildcards on the table.",
+    evaluate: ({ player, summary }) => {
+      if (!isCardDetailMode(summary)) return false;
+      return summary.matchEvents.rounds.some(r => r.winnerIdx === player.idx && (r.winnerWildsOnTable || 0) >= 3);
+    },
+  },
+  {
+    id: "magpie", name: "Magpie", icon: "🐦", category: "card", modes: PLAY_MODES,
+    description: "Draw from the discard pile 5 times in a match.",
+    evaluate: ({ player, summary }) => {
+      if (!isCardDetailMode(summary)) return false;
+      const pickups = summary.matchEvents.pickups || [];
+      return pickups.filter(p => p.playerIdx === player.idx).length >= 5;
+    },
+  },
+  {
+    id: "survivor", name: "Survivor", icon: "🧗", category: "card", modes: PLAY_MODES,
+    description: "Take the smallest hit in a No Way Out round.",
+    evaluate: ({ player, summary }) =>
+      summary.roundHistory.some(r =>
+        r.noWayOut && Array.isArray(r.scores) && r.scores[player.idx] === Math.min(...r.scores)),
+  },
+
+  // ---- Lifetime / meta (counted per-mode) ----
+  {
+    id: "champion", name: "Champion", icon: "👑", category: "meta", modes: ALL_MODES,
+    description: "Win 10 matches in this mode.",
+    evaluate: ({ player, summary, profile }) =>
+      player.isWinner && priorWinsInMode(profile, summary.mode) + 1 >= 10,
+  },
+  {
+    id: "seasoned", name: "Seasoned", icon: "🧭", category: "meta", modes: ALL_MODES,
+    description: "Play 25 matches in this mode.",
+    evaluate: ({ summary, profile }) => priorMatchesInMode(profile, summary.mode) + 1 >= 25,
+  },
+  {
+    id: "on_a_roll", name: "On a Roll", icon: "🎲", category: "meta", modes: ALL_MODES,
+    description: "Win 3 matches in a row in this mode.",
+    evaluate: ({ player, summary, profile }) =>
+      player.isWinner && leadingWinsInMode(profile, summary.mode) >= 2,
   },
 ];
 
