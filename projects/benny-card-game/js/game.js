@@ -304,7 +304,7 @@ export function swapWildcard(state, setId, positionIndex, naturalCardId) {
 
 // Discard a single card to end the turn. Triggers win check.
 export function discard(state, cardId) {
-  if (state.phase !== "canAct" && state.phase !== "mustDiscard") {
+  if (state.phase !== "canAct") {
     return { ok: false, reason: "Can't discard now." };
   }
   const player = currentPlayer(state);

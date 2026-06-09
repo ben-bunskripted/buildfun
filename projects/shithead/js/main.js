@@ -590,7 +590,9 @@ function maybeToastAchievements() {
   if (!e || !e.playerId) return;
   const s = ui.summaries[e.playerId];   // only tracked humans have a summary
   if (!s) return;
-  const have = new Set(getProfile(byId(e.playerId).name).achievements);
+  const player = byId(e.playerId);
+  if (!player) return;
+  const have = new Set(getProfile(player.name).achievements);
   for (const id of evaluate(s)) {
     if (!LIVE_ACH.has(id) || have.has(id) || ui.toastedAch.has(id)) continue;
     ui.toastedAch.add(id);
@@ -893,6 +895,7 @@ function bindSelect(el, id, zoneName, summ) {
 
 function toggleSelect(id, zoneName, summ) {
   const viewer = byId(ui.viewerId);
+  if (!viewer) return;
   const card = [...viewer.hand, ...viewer.faceUp].find((c) => c.id === id);
   if (!card) return;
   if (summ && !summ.ranks.includes(card.rank)) { toast("You can't play that on the pile."); return; }
@@ -1260,7 +1263,7 @@ function onResume() {
   ui.faceDownSlots = {};
   ui.toastedAch = new Set();
   ui.ephemeral = false;
-  if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => !byId(id).ready); nextSwap(); }
+  if (state.phase === "swap") { swapQueue = ui.humans.filter((id) => { const p = byId(id); return p && !p.ready; }); nextSwap(); }
   else if (state.phase === "over") { enterPlay(); }
   else { enterPlay(); }
 }

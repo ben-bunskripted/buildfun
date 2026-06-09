@@ -244,7 +244,7 @@ export function route() {
     // so when we first pick up our own turn from a poll the action handlers
     // would all gate out (`phase !== "mustDraw"`). beginTurn() flips passing
     // → mustDraw (or canAct for the dealer's opener). We guard on the entry
-    // phase so mid-turn refreshes don't clobber a canAct/mustDiscard state.
+    // phase so mid-turn refreshes don't clobber a canAct state.
     if (st.phase === "passing") beginTurn(st);
     cb.endSpectatorLock();
     cb.showScreen("screen-play");
