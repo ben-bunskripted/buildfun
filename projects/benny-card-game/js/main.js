@@ -3456,7 +3456,7 @@ function renderLobbyRoster(players, server) {
 // worker cache key (the thing that actually gates asset freshness): if it
 // disagrees with this constant, the client is serving stale cached assets and
 // the stamp flags it in red.
-const APP_BUILD = "v84";
+const APP_BUILD = "v88";
 
 // Display the build as dot-separated digits, zero-padded to 3 ("v74" -> "v.0.7.4").
 function formatBuild(ver) {
