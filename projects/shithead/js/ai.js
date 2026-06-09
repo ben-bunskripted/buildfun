@@ -1,9 +1,20 @@
 // Sh!thead CPU. planTurn(state) returns a single action for the current player.
 // Three tiers:
 //   easy   — plays a random legal card, one at a time.
-//   normal — sheds the lowest legal card, hoards power cards (2/10) for when stuck.
-//   hard   — normal + completes 4-of-a-kinds, burns fat/dangerous piles, dumps
-//            duplicates, and is stingier with its power cards.
+//   normal — sheds the lowest legal card, dumps its duplicates, completes a
+//            four-of-a-kind to burn, and hoards its powers (2/10/joker) for when
+//            it is otherwise stuck.
+//   hard   — normal, plus two refinements that win measurably more games in
+//            self-play: on a high pile (a face card or ace showing) it resets
+//            with a cheap 2 rather than spending a scarce high card; and in the
+//            endgame (deck spent) it plays its Aces one at a time, keeping one as
+//            a universal always-legal escape instead of dumping the pair.
+//
+// Things that were tried and did NOT help (kept out on the evidence): pressuring
+// opponents off card-counting memory or their visible face-up row — even forcing
+// a guaranteed pickup with perfect information was neutral, because the spots you
+// can force are ones you were already winning, and acting on partial information
+// disorders your own hand for less than it gains.
 
 import { value, requirement, canPlayRank, isJokerAnswer } from "./rules.js";
 import { currentZone } from "./game.js";
@@ -72,52 +83,35 @@ export function planTurn(state) {
   // ----- normal / hard ranking of candidate ranks -----
   const ranks = [...byRank.keys()];
 
-  if (diff === "hard") {
-    // 1) Complete a four-of-a-kind already building on the pile → instant burn.
-    const top = state.pile[state.pile.length - 1];
-    if (top && opts.fourKindAcrossTurns) {
-      const sameOnTop = countTopSame(state.pile);
-      if (sameOnTop >= 1 && byRank.has(top.rank)) {
-        const need = 4 - sameOnTop;
-        const have = byRank.get(top.rank);
-        if (have.length >= need && need > 0) {
-          return playAction(p, zone, have.slice(0, Math.min(have.length, 4)));
-        }
-      }
-    }
-    // 2) Burn a fat or high pile we'd rather not hand over, if we hold a 10.
-    const dangerous = state.pile.length >= 5 || (top && value(top.rank) >= 12);
-    if (dangerous && byRank.has("10")) {
-      return playAction(p, zone, byRank.get("10").slice(0, 1));
-    }
-    // 3) Pressure the next player into picking up. We know some of their cards
-    //    from piles they scooped (state.memory); playing above their known
-    //    highest tends to force a pickup. If they're about to go out, hit them
-    //    harder — a joker (full pickup) or a high card to set them right back.
-    const next = nextOpponent(state, p);
-    if (next) {
-      const close = totalCards(next) <= 4;          // a couple of cards from finishing
-      const knownMax = knownMaxValue(state, next.id);
-      if (close && byRank.has("JK")) {
-        return playAction(p, zone, byRank.get("JK").slice(0, 1));
-      }
-      const nonPowerAsc = ranks.filter((r) => !POWER.has(r)).sort((a, b) => value(a) - value(b));
-      // When they're close, lead high (≥ 9) to make them sweat; otherwise just
-      // clear their known holdings as cheaply as we can.
-      const floor = close ? Math.max(knownMax, 9) : (knownMax >= 3 && knownMax <= 8 ? knownMax : Infinity);
-      const above = nonPowerAsc.filter((r) => value(r) > floor);
-      if (above.length) {
-        const r = close ? above[above.length - 1] : above[0];
-        return playAction(p, zone, byRank.get(r));
-      }
-    }
+  // Burn the pile whenever we can complete a four-of-a-kind — it clears the
+  // board and (with replayOnBurn) hands us another turn, one of the strongest
+  // plays in the game. Worth taking for both normal and hard, ahead of an
+  // ordinary shed.
+  const burn = burnPlay(state, byRank, opts);
+  if (burn) return playAction(p, zone, burn);
+
+  if (diff === "hard" && req.kind === "min" && req.value >= value("J") && byRank.has("2")) {
+    // A face card or ace is showing. Rather than spend a scarce high climber
+    // (or a 10) to clear it, reset the pile with a single 2: a 2 is our most
+    // disposable card (always playable, so never stranded), and keeping our
+    // J/Q/K/A and 10s in reserve wins materially more games in self-play.
+    return playAction(p, zone, byRank.get("2").slice(0, 1));
   }
 
-  // Prefer the lowest non-power rank; dump all duplicates of it.
+  // Prefer the lowest non-power rank; dump all duplicates of it. One endgame
+  // exception: once the deck is spent we play our Aces one at a time. An Ace is
+  // the only non-power card legal on ANY pile (nothing outranks it), so a held
+  // Ace is a permanent "never forced to pick up" escape — dumping our last pair
+  // together throws that insurance away, and self-play confirms keeping one in
+  // reserve wins more endgames.
   const nonPower = ranks.filter((r) => !POWER.has(r)).sort((a, b) => value(a) - value(b));
   if (nonPower.length) {
     const r = nonPower[0];
-    return playAction(p, zone, byRank.get(r));
+    const cards = byRank.get(r);
+    if (diff === "hard" && state.deck.length === 0 && r === "A" && cards.length > 1) {
+      return playAction(p, zone, cards.slice(0, 1));
+    }
+    return playAction(p, zone, cards);
   }
 
   // Only powers are legal. On a fat pile, fire a joker to dump it on the next
@@ -131,25 +125,24 @@ export function planTurn(state) {
   return playAction(p, zone, byRank.get(ranks[0]).slice(0, 1));
 }
 
-// Total cards a player still holds across all zones — small means near the end.
-function totalCards(p) { return p.hand.length + p.faceUp.length + p.faceDown.length; }
-
-// The next active opponent in the current play direction (skips finished seats
-// and the player themself). Mirrors game.js's seat advance.
-function nextOpponent(state, p) {
-  const n = state.players.length;
-  const dir = state.direction === -1 ? -1 : 1;
-  let i = state.current, guard = 0;
-  do { i = (i + dir + n) % n; guard++; } while (guard < n * 2 && (state.players[i].finished || state.players[i].id === p.id));
-  const q = state.players[i];
-  return q && !q.finished && q.id !== p.id ? q : null;
-}
-
-// Highest card value a player is known to hold from piles they've scooped.
-function knownMaxValue(state, id) {
-  const known = state.memory && state.memory[id];
-  if (!known || !known.length) return 0;
-  return Math.max(...known.map((r) => value(r)));
+// A play that burns the pile this turn by completing a four-of-a-kind: either
+// topping off a run already on the pile, or laying four of one rank we hold at
+// once. Returns the cards to play, or null. Powers are skipped — a 2/10/joker
+// is worth more used for its own effect than spent burning.
+function burnPlay(state, byRank, opts) {
+  const top = state.pile[state.pile.length - 1];
+  if (top && opts.fourKindAcrossTurns && !POWER.has(top.rank)) {
+    const sameOnTop = countTopSame(state.pile);
+    if (sameOnTop >= 1 && sameOnTop < 4 && byRank.has(top.rank)) {
+      return byRank.get(top.rank);            // our copies complete the four → burn
+    }
+  }
+  let best = null;
+  for (const [r, cs] of byRank) {
+    if (POWER.has(r)) continue;
+    if (cs.length >= 4 && (best === null || value(r) < value(best))) best = r;
+  }
+  return best === null ? null : byRank.get(best);
 }
 
 function countTopSame(pile) {

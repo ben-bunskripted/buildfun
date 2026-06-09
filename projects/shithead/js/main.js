@@ -10,7 +10,7 @@ import { comparisonCard, requirement, SUIT_GLYPH, value } from "./rules.js";
 import { planTurn, planSwaps } from "./ai.js";
 import * as storage from "./storage.js";
 import { recordMatch, addAchievements, accrueProgress, getProfile, listProfiles } from "./profiles.js";
-import { evaluate, evaluateProgress, emptySummary, achievementById, ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS } from "./achievements.js";
+import { evaluate, evaluateProgress, emptySummary, achievementById, ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS, totalAchievementCount, countUnlocked } from "./achievements.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -584,7 +584,7 @@ function floatLabel(text) {
 
 // Achievements that can be settled mid-game (no dependence on final place /
 // Sh!thead status) — toast them the moment they're earned for instant feedback.
-const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing"]);
+const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing", "spin_cycle", "hat_trick", "dumpster_dive"]);
 function maybeToastAchievements() {
   const e = state && state.lastEvent;
   if (!e || !e.playerId) return;
@@ -1142,7 +1142,9 @@ function trackEvent() {
   if (e.type === "play") {
     const tens = e.cards.filter((c) => c.rank === "10").length;
     const twos = e.cards.filter((c) => c.rank === "2").length;
-    s.tens += tens; s.twos += twos;
+    const eights = e.cards.filter((c) => c.rank === "8").length;
+    s.tens += tens; s.twos += twos; s.eights += eights;
+    s.bigPlay = Math.max(s.bigPlay, e.cards.length);   // largest same-rank stack laid in one move
     if (e.joker) s.jokers += e.cards.length;
     if (e.deflect) s.deflects += 1;
     if (e.burned) { s.burns += 1; if (tens === 0) s.fourKinds += 1; }
@@ -1214,7 +1216,20 @@ function persist() {
 }
 
 const MODE_LABEL = { cpu: "Solo vs CPU", local: "Pass & Play" };
+// Show the device owner's unlocked tally on the gold "Stats & achievements" bar
+// (e.g. "12 / 24"). Refreshed whenever the home screen renders.
+function refreshTrophyCount() {
+  const el = $("#trophy-count");
+  if (!el) return;
+  const total = totalAchievementCount();
+  const have = countUnlocked(getProfile(prefs.name));
+  el.textContent = `${have} / ${total}`;
+  el.title = `${have} of ${total} achievements unlocked`;
+  el.hidden = false;
+}
+
 function renderSaved() {
+  refreshTrophyCount();
   const list = $("#saved-list");
   const section = $("#saved-section");
   if (!list || !section) return;
@@ -1315,7 +1330,7 @@ function wireSettings() {
 
 // ---- running-version stamp (start-screen footer). Keep APP_BUILD in sync with
 // CACHE in sw.js; if the active SW cache key disagrees, flag the stale build.
-const APP_BUILD = "v23";
+const APP_BUILD = "v24";
 function formatBuild(ver) {
   const n = String(ver).replace(/^v/i, "").padStart(3, "0");
   return "v." + n.split("").join(".");
@@ -1349,8 +1364,15 @@ function renderAchievementCard(a, unlocked) {
     `<div class="achievement-icon" aria-hidden="true">${a.icon || "🏆"}</div>` +
     `<div class="achievement-info">` +
     `<div class="achievement-name">${escapeHtml(a.name)}</div>` +
-    `<div class="achievement-desc">${escapeHtml(a.desc)}</div></div>`;
+    `<div class="achievement-desc">${escapeHtml(a.desc)}</div></div>` +
+    tierBadge(a.tier);
   return el;
+}
+
+// Small colour-coded difficulty chip (easy / medium / hard / rare).
+function tierBadge(tier) {
+  if (!tier) return "";
+  return `<span class="ach-tier ach-tier-${tier}">${escapeHtml(tier)}</span>`;
 }
 function achievementsGrid(unlockedIds) {
   const grid = document.createElement("div");
@@ -1372,7 +1394,8 @@ function renderProgressCard(item) {
     `<div class="achievement-name">${escapeHtml(def.name)}</div>` +
     `<div class="achievement-desc">${escapeHtml(def.desc)}</div>` +
     `<div class="ach-progress"><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${pct}%"></div></div>` +
-    `<span class="ach-progress-label">${value} / ${target}</span></div></div>`;
+    `<span class="ach-progress-label">${value} / ${target}</span></div></div>` +
+    tierBadge(def.tier);
   return el;
 }
 function progressGrid(profile) {
@@ -1434,7 +1457,7 @@ function renderStatsBody(prof) {
       <span>Sh!thead</span><b>${s.shitheads}</b>
       <span>Best streak</span><b>${s.bestStreak}</b>
     </div>
-    <div class="ach-count">${prof.achievements.length} / ${ACHIEVEMENTS.length} achievements unlocked</div>`;
+    <div class="ach-count">${countUnlocked(prof)} / ${totalAchievementCount()} achievements unlocked</div>`;
   if (prof.history && prof.history.length) {
     div.appendChild(sectionTitle("Recent games"));
     div.appendChild(renderSparkline(prof.history));
