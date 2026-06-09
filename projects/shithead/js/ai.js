@@ -4,13 +4,17 @@
 //   normal — sheds the lowest legal card, dumps its duplicates, completes a
 //            four-of-a-kind to burn, and hoards its powers (2/10/joker) for when
 //            it is otherwise stuck.
-//   hard   — normal, plus: on a high pile (a face card or ace showing) it resets
-//            with a cheap 2 instead of spending a scarce high card — keeping its
-//            strong cards in reserve, which wins measurably more games.
+//   hard   — normal, plus two refinements that win measurably more games in
+//            self-play: on a high pile (a face card or ace showing) it resets
+//            with a cheap 2 rather than spending a scarce high card; and in the
+//            endgame (deck spent) it plays its Aces one at a time, keeping one as
+//            a universal always-legal escape instead of dumping the pair.
 //
-// (An earlier "hard" tier tried to pressure opponents by leading high cards off
-// its known card-counting memory; self-play showed that disordering its own hand
-// on incomplete information lost far more than it gained, so it was removed.)
+// Things that were tried and did NOT help (kept out on the evidence): pressuring
+// opponents off card-counting memory or their visible face-up row — even forcing
+// a guaranteed pickup with perfect information was neutral, because the spots you
+// can force are ones you were already winning, and acting on partial information
+// disorders your own hand for less than it gains.
 
 import { value, requirement, canPlayRank, isJokerAnswer } from "./rules.js";
 import { currentZone } from "./game.js";
@@ -94,11 +98,20 @@ export function planTurn(state) {
     return playAction(p, zone, byRank.get("2").slice(0, 1));
   }
 
-  // Prefer the lowest non-power rank; dump all duplicates of it.
+  // Prefer the lowest non-power rank; dump all duplicates of it. One endgame
+  // exception: once the deck is spent we play our Aces one at a time. An Ace is
+  // the only non-power card legal on ANY pile (nothing outranks it), so a held
+  // Ace is a permanent "never forced to pick up" escape — dumping our last pair
+  // together throws that insurance away, and self-play confirms keeping one in
+  // reserve wins more endgames.
   const nonPower = ranks.filter((r) => !POWER.has(r)).sort((a, b) => value(a) - value(b));
   if (nonPower.length) {
     const r = nonPower[0];
-    return playAction(p, zone, byRank.get(r));
+    const cards = byRank.get(r);
+    if (diff === "hard" && state.deck.length === 0 && r === "A" && cards.length > 1) {
+      return playAction(p, zone, cards.slice(0, 1));
+    }
+    return playAction(p, zone, cards);
   }
 
   // Only powers are legal. On a fat pile, fire a joker to dump it on the next

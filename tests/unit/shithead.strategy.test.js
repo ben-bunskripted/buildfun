@@ -98,6 +98,26 @@ describe("CPU play selection", () => {
     const act = planTurn(s);
     expect(act.cardIds).toEqual(["6H"]);                          // cheapest plain climb, 2 stays in reserve
   });
+
+  it("in the endgame plays Aces one at a time, keeping one as a universal escape", () => {
+    const s = playGame();
+    const a = s.players[0];
+    s.deck = [];                                                  // deck spent → endgame
+    s.pile = [];
+    a.hand = [card("A", "S"), card("A", "H")];                    // a pair of aces, nothing else
+    const act = planTurn(s);
+    expect(act.cardIds).toEqual(["AS"]);                          // one ace, keep the other in reserve
+  });
+
+  it("still dumps a pair of Aces together while the deck still has cards", () => {
+    const s = playGame();
+    const a = s.players[0];
+    expect(s.deck.length).toBeGreaterThan(0);                     // mid-game: hand refills, no reserve needed
+    s.pile = [];
+    a.hand = [card("A", "S"), card("A", "H")];
+    const act = planTurn(s);
+    expect(act.cardIds.slice().sort()).toEqual(["AH", "AS"]);     // both go
+  });
 });
 
 describe("engine robustness", () => {
