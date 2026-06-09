@@ -1980,7 +1980,7 @@ function chooseAdditionArrangement(arrangements, set, onPick) {
 // if the card isn't currently playable to anything under the pointer.
 function resolveDropTarget(clientX, clientY, cardEl) {
   if (!state) return null;
-  if (state.phase !== "canAct" && state.phase !== "mustDiscard") return null;
+  if (state.phase !== "canAct") return null;
   const me = currentPlayer(state);
   if (!me) return null;
   const draggedId = cardEl.dataset.cardId;

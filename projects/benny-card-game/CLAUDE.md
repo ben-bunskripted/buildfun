@@ -184,7 +184,7 @@ labels the most recent saved match with its mode name.
 
 ## Match-event log
 
-`game.js` state carries a `matchEvents: {opens, discards, rounds}` slice used only by the achievement evaluator at match-end. Populated by `placeNewSet` (first time a player opens in a round), `discard` (every discard, with `wasWild` flag), and `finalizeRoundScoring` (per-round meta: winner, dealer, `openedOrder`, `winnerWildsOnTable`). Scoring mode emits the same `rounds` shape with `openedOrder: null` so the evaluator can branch on "no card detail available". When a run is *added to* by someone other than the owner, the added cards are credited to the adder (in their meld history) AND counted toward the owner's run-length stats — see the credit-additions changes in game.js.
+`game.js` state carries a `matchEvents: {opens, discards, rounds, setsPlayed, pickups}` slice. `opens`/`discards`/`rounds`/`setsPlayed` feed the achievement evaluator at match-end; `discards` and `pickups` are also read mid-game by the hard CPU's discard defence (`pickups` — every `drawFromDiscard`, with rank/suit — is public information, so the AI isn't peeking). Populated by `placeNewSet` (first time a player opens in a round), `discard` (every discard, with `wasWild` flag), `drawFromDiscard` (pickups), and `finalizeRoundScoring` (per-round meta: winner, dealer, `openedOrder`, `winnerWildsOnTable`). Scoring mode emits the same `rounds` shape with `openedOrder: null` so the evaluator can branch on "no card detail available". When a run is *added to* by someone other than the owner, the added cards are credited to the adder (in their meld history) AND counted toward the owner's run-length stats — see the credit-additions changes in game.js.
 
 ## Number-set sizing
 
