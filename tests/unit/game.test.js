@@ -103,6 +103,25 @@ describe("draws", () => {
     expect(r.card.id).toBe("9D");
     expect(topOfDiscard(s).id).toBe("2C");
   });
+  it("drawFromDiscard records a pickup event (public info for the hard CPU)", () => {
+    const s = freshMatch(["A", "B"]);
+    s.phase = "mustDraw";
+    s.currentPlayerIndex = 1;
+    s.discardPile = cards("9D");
+    expect(drawFromDiscard(s).ok).toBe(true);
+    expect(s.matchEvents.pickups).toEqual([
+      { round: s.round, playerIdx: 1, rank: "9", suit: "D" },
+    ]);
+  });
+  it("drawFromDiscard migrates saved states that predate matchEvents.pickups", () => {
+    const s = freshMatch(["A", "B"]);
+    s.phase = "mustDraw";
+    s.currentPlayerIndex = 0;
+    s.discardPile = cards("9D");
+    delete s.matchEvents.pickups; // pre-pickups save shape
+    expect(drawFromDiscard(s).ok).toBe(true);
+    expect(s.matchEvents.pickups).toHaveLength(1);
+  });
 });
 
 describe("placeNewSet", () => {

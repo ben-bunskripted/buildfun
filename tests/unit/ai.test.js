@@ -386,6 +386,85 @@ describe("planTurn — hard: shape-aware opening", () => {
   });
 });
 
+describe("planTurn — discard defence: opened opponents can use ANY table set", () => {
+  it("won't gift a card that fits the CPU's OWN meld once an opponent has opened", () => {
+    // The engine has no ownership check on addToSet: an opened opponent can
+    // bolt our discard onto OUR run. We hold 8♠ (extends our own 5-6-7♠) but
+    // haven't opened ourselves, so we can't use it — the greedy "shed highest
+    // value" rule would discard it. With an opened opponent at the table,
+    // that's a gift; shed the next-best card instead.
+    const s = turnFixture({
+      hand: ["8S", "5H", "2C"],
+      table: [
+        runSet("S", 5, [natSlot("5S"), natSlot("6S"), natSlot("7S")], { id: "run1", ownerIndex: 0 }),
+        numberSet("J", [natSlot("JC"), natSlot("JD"), natSlot("JH")], { id: "set1", ownerIndex: 1 }),
+      ],
+      deckTop: "3D",
+    });
+    s.players[0].hasOpened = false; // we can't add the 8♠ ourselves
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    const disc = plan.find(a => a.type === "discard");
+    expect(disc.cardId).not.toBe("8S");
+  });
+
+  it("won't hand an opened opponent the key to a buried wildcard", () => {
+    // Short hand, so the self-hoard taper no longer protects the 10♥ — but the
+    // opponent has opened, and our 10♥ swaps the benny out of the table run.
+    // Discarding it lets them pick it up and reclaim 15-point go-out fuel, so
+    // the CPU sheds the 9♣ instead.
+    const s = turnFixture({
+      hand: ["10H", "9C"],
+      table: [runSet("H", 8, [natSlot("8H"), natSlot("9H"), wildSlot("KC", "10", "H"), natSlot("JH")], { id: "run1", ownerIndex: 1 })],
+      deckTop: "2H",
+    });
+    s.players[0].hasOpened = false;
+    s.players[1].hasOpened = true;
+    const plan = planTurn(s, "hard");
+    const disc = plan.find(a => a.type === "discard");
+    expect(disc.cardId).toBe("9C");
+  });
+
+  it("hard: won't feed a rank an opponent picked up from the discard this round", () => {
+    // The opponent took a 7 off the pile — a declared collecting signal. Our
+    // highest shed candidate is a 7; give up the next card down instead.
+    const s = turnFixture({
+      hand: ["7D", "5C", "2C"],
+      table: [],
+      deckTop: "3S",
+    });
+    s.matchEvents.pickups = [{ round: s.round, playerIdx: 1, rank: "7", suit: "H" }];
+    const plan = planTurn(s, "hard");
+    const disc = plan.find(a => a.type === "discard");
+    expect(disc.cardId).not.toBe("7D");
+  });
+});
+
+describe("planTurn — forecast matches the engine after a left run extension", () => {
+  it("plans add-then-swap with positions the engine accepts", () => {
+    // Regression: virtualState used to APPEND run additions, so after a left
+    // extension every later positionIndex in the plan was off by the prepended
+    // count and the engine rejected the swap ("Target isn't a wildcard").
+    // Run Q-(W=K)-A of diamonds; J♦ prepends (shifting the wild right) and K♦
+    // swaps the wild out. Both must apply cleanly through the real engine.
+    const s = turnFixture({
+      hand: ["JD", "KD", "9C", "5H", "8S"],
+      table: [runSet("D", 12, [natSlot("QD"), wildSlot("2D", "K", "D"), natSlot("AD")], { id: "run1", ownerIndex: 0 })],
+      deckTop: "3S",
+    });
+    s.wildcardRank = "2";
+    const plan = planTurn(s, "hard");
+    expect(plan.some(a => a.type === "add" && a.arrangement.added.some(c => c.card.id === "JD"))).toBe(true);
+    expect(plan.some(a => a.type === "swap" && a.naturalCardId === "KD")).toBe(true);
+    beginTurn(s);
+    for (const a of plan) {
+      const r = applyAction(s, a);
+      expect(r.ok, `action ${a.type} failed: ${r.reason}`).toBe(true);
+    }
+    expect(s.players[0].hand.some(c => c.id === "2D")).toBe(true); // benny reclaimed
+  });
+});
+
 describe("planTurn — dealer opening turn", () => {
   it("opens without drawing (the dealer's first turn has no draw)", () => {
     const s = makeCpuMatch(3, "hard");

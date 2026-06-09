@@ -60,7 +60,9 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     // `rounds`: per-round meta (winner, dealer, # wildcards in winning play).
     // `setsPlayed`: every set placed/extended on the table — captures rank,
     //   suit, length and wild count so we can score suit/rank/run achievements.
-    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [] },
+    // `pickups`: every draw from the discard pile (public info — read by the
+    //   hard CPU to avoid feeding ranks an opponent is visibly collecting).
+    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [] },
   };
 }
 
@@ -144,6 +146,15 @@ export function drawFromDiscard(state) {
   p.drawsThisRound = (p.drawsThisRound || 0) + 1;
   state.lastDrawnCardId = card.id;
   state.phase = "canAct";
+
+  ensureMatchEvents(state);
+  state.matchEvents.pickups.push({
+    round: state.round,
+    playerIdx: state.currentPlayerIndex,
+    rank: card.rank,
+    suit: card.suit,
+  });
+
   return { ok: true, card };
 }
 
@@ -196,10 +207,11 @@ export function placeNewSet(state, arrangement) {
 
 function ensureMatchEvents(state) {
   if (!state.matchEvents) {
-    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [] };
-  } else if (!Array.isArray(state.matchEvents.setsPlayed)) {
-    state.matchEvents.setsPlayed = [];
+    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [] };
+    return;
   }
+  if (!Array.isArray(state.matchEvents.setsPlayed)) state.matchEvents.setsPlayed = [];
+  if (!Array.isArray(state.matchEvents.pickups)) state.matchEvents.pickups = [];
 }
 
 function recordOpen(state, playerIdx) {

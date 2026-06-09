@@ -77,7 +77,7 @@ function opponentDiscardedRanks(state, oppIdx) {
   const out = new Set();
   let count = 0;
   for (const d of (state.matchEvents && state.matchEvents.discards) || []) {
-    if (d.playerIdx !== oppIdx) continue;
+    if (d.round !== state.round || d.playerIdx !== oppIdx) continue;
     out.add(d.rank);
     count += 1;
   }
@@ -263,7 +263,23 @@ function virtualState(state, actions) {
       const set = v.table.find(s => s.id === a.setId);
       const ids = a.arrangement.added.map(c => c.card.id);
       me.hand = me.hand.filter(c => !ids.includes(c.id));
-      if (set) set.cards.push(...a.arrangement.added.map(c => ({ ...c })));
+      if (set) {
+        if (set.type === "number" || a.arrangement.newBaseValue == null) {
+          set.cards.push(...a.arrangement.added.map(c => ({ ...c })));
+        } else {
+          // Mirror the engine's run ordering (game.js addToSet): merge by
+          // position and update baseValue, so any LATER swap/play in this plan
+          // forecasts positions the engine will agree with. Appending instead
+          // left every post-add positionIndex stale after a left extension.
+          const all = [
+            ...set.cards.map((c, i) => ({ ...c, __position: set.baseValue + i })),
+            ...a.arrangement.added.map(c => ({ ...c })),
+          ];
+          all.sort((x, y) => x.__position - y.__position);
+          set.baseValue = a.arrangement.newBaseValue;
+          set.cards = all.map(c => ({ card: c.card, isWild: c.isWild, representsRank: c.representsRank, representsSuit: c.representsSuit }));
+        }
+      }
     } else if (a.type === "swap") {
       const me = v.players[v.currentPlayerIndex];
       const set = v.table.find(s => s.id === a.setId);
@@ -329,24 +345,38 @@ function chooseDiscard(state, difficulty) {
     ? state.players.map((_, i) => i === state.currentPlayerIndex ? null : opponentDiscardedRanks(state, i))
     : null;
 
+  // Opponents who have opened can add to (or swap from) ANY set on the table,
+  // not just their own — the engine has no ownership check. Every defensive
+  // penalty below keys off this list.
+  const openedOpps = [];
+  for (let oi = 0; oi < state.players.length; oi++) {
+    if (oi !== state.currentPlayerIndex && state.players[oi].hasOpened) openedOpps.push(oi);
+  }
+
   const candidates = pool.map(card => {
     let badness = -pointValue(card, wildRank); // unloading high value = good (lower badness)
-    // Don't gift opponents — penalise discarding a card any opponent could
-    // bolt straight onto one of their melds. Scale by the highest-threat
-    // opponent so endgame play stops gifting cards entirely.
-    for (let oi = 0; oi < state.players.length; oi++) {
-      if (oi === state.currentPlayerIndex) continue;
-      const opp = state.players[oi];
-      for (const set of state.table) {
-        if (set.ownerIndex !== oi) continue;
-        const trial = validateAddition(set, [card], wildRank);
-        if (!trial.ok) continue;
+    // A card playable onto any table meld, and any buried wildcard it could
+    // swap free, are gifts to whichever opened opponent picks the card up.
+    const fitsAnySet = openedOpps.length > 0 &&
+      state.table.some(set => validateAddition(set, [card], wildRank).ok);
+    const swap = findSwappableWildFor(card, state.table, wildRank);
+    // Don't gift opponents — penalise discarding a card an opened opponent
+    // could pick up and bolt straight onto a meld (a pickup + add shrinks
+    // their hand by one net card, the fastest path to going out there is).
+    if (fitsAnySet) {
+      for (const oi of openedOpps) {
         const base = difficulty === "hard" ? 100 : 60;
         // Weight the gift penalty by THIS opponent's threat, not the max —
         // gifting a leader is worse than gifting a struggler.
         const oppMult = 1 + Math.min(1, opponentThreat(state, oi) / 100);
         badness += base * oppMult;
       }
+    }
+    // Same idea for swap keys: an opened opponent can pick this card up and
+    // reclaim a 15-point benny as go-out fuel. Softer than the add penalty —
+    // the swap itself doesn't shrink their hand.
+    if (!goingOut && swap && openedOpps.length) {
+      badness += (difficulty === "hard" ? 60 : 30) * threatMult;
     }
     if (difficulty === "hard") {
       // Keeping pairs/adjacent cards is more valuable on hard.
@@ -365,6 +395,17 @@ function chooseDiscard(state, difficulty) {
           if (!prof.ranks.has(card.rank)) badness += 6 * threatMult;
         }
       }
+      // Pickup defence: a card an opponent took from the discard pile this
+      // round is a declared "collecting" signal — much stronger than the
+      // never-discarded tell above. Don't feed the same rank back, and nudge
+      // away from same-suit neighbours (run-building).
+      if (!goingOut) {
+        for (const pu of (state.matchEvents && state.matchEvents.pickups) || []) {
+          if (pu.round !== state.round || pu.playerIdx === state.currentPlayerIndex) continue;
+          if (pu.rank === card.rank) badness += 25 * threatMult;
+          else if (pu.suit === card.suit && Math.abs(rankVal(pu.rank) - rankVal(card.rank)) <= 2) badness += 8 * threatMult;
+        }
+      }
     } else { // medium
       const sameRank = me.hand.filter(c => c.rank === card.rank).length;
       if (sameRank >= 2) badness += 5;
@@ -377,15 +418,12 @@ function chooseDiscard(state, difficulty) {
     // "holds big cards with one or two left" problem). So taper the hoard off
     // as our hand gets short, and drop it entirely at <=3 cards. (goingOut and
     // opponent-endgame already disable it: a hold is worse than a clean shed.)
-    if (!goingOut && !endgame) {
-      const swap = findSwappableWildFor(card, state.table, wildRank);
-      if (swap) {
-        const room = me.hand.length;                    // breathing room before we're exposed
-        const full = difficulty === "hard" ? 25 : 14;
-        if (room >= 5) badness += full;
-        else if (room === 4) badness += full * 0.5;
-        // room <= 3: don't hoard — shedding the high card wins.
-      }
+    if (!goingOut && !endgame && swap) {
+      const room = me.hand.length;                    // breathing room before we're exposed
+      const full = difficulty === "hard" ? 25 : 14;
+      if (room >= 5) badness += full;
+      else if (room === 4) badness += full * 0.5;
+      // room <= 3: don't hoard — shedding the high card wins.
     }
     // Small randomness so the CPU isn't perfectly predictable.
     if (difficulty === "hard") badness += (randomInt(7) - 3) * 0.3;
@@ -682,8 +720,11 @@ function wantsDiscardTop(state, top, difficulty) {
   const after = enumerateNewSets([...me.hand, top], wildRank, state.table).length;
   if (after > before) return true;
   if (difficulty === "hard") {
+    // Speculative pair-building adds hand value, so skip it once an opponent
+    // is about to go out — getting caught with the extra card costs more than
+    // the pair is worth.
     const sameRank = me.hand.filter(c => c.rank === top.rank).length;
-    if (sameRank >= 1) return true;
+    if (sameRank >= 1 && maxOpponentThreat(state) < 80) return true;
   }
   return false;
 }
