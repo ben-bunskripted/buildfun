@@ -39,7 +39,7 @@ describe("four-of-a-kind burns across turns", () => {
   });
 });
 
-describe("CPU pickup memory + endgame pressure", () => {
+describe("CPU pickup memory (engine, public info)", () => {
   it("remembers the ranks a player scoops, and forgets them as they're played", () => {
     const s = playGame();
     const a = s.players[0];
@@ -54,27 +54,49 @@ describe("CPU pickup memory + endgame pressure", () => {
     expect(s.memory.a).not.toContain("9");
     expect(s.memory.a).toContain("5");
   });
+});
 
-  it("plays a high card to pressure an opponent who is about to go out", () => {
+describe("CPU play selection", () => {
+  it("completes a four-of-a-kind already on the pile to burn it", () => {
     const s = playGame();
-    const a = s.players[0], b = s.players[1];
-    s.pile = [];
-    a.hand = [card("4", "S"), card("K", "H")];
-    b.hand = [card("5", "C")]; b.faceUp = []; b.faceDown = [];   // one card from winning
+    const a = s.players[0];
+    s.pile = [card("5", "S"), card("5", "H"), card("5", "D")];   // three 5s down
+    a.hand = [card("5", "C"), card("9", "S")];                   // we hold the fourth
     const act = planTurn(s);
-    expect(act.cardIds).toContain("KH");                          // slam high, not the 4
+    expect(act.cardIds).toContain("5C");                          // complete the four, not the 9
+    applyAction(s, act);
+    expect(s.lastEvent.burned).toBe(true);
+    expect(s.pile.length).toBe(0);
   });
 
-  it("plays the cheapest card above an opponent's known holdings to force a pickup", () => {
+  it("lays a held four-of-a-kind to burn rather than shedding a single low card", () => {
     const s = playGame();
-    const a = s.players[0], b = s.players[1];
-    s.pile = [];
-    a.hand = [card("4", "S"), card("7", "S"), card("K", "H")];
-    b.hand = [card("x1"), card("x2"), card("x3"), card("x4"), card("x5")];
-    b.faceUp = [card("y1"), card("y2"), card("y3")];             // not close
-    s.memory = { b: ["6", "5", "2"] };                            // known max held = 6
+    const a = s.players[0];
+    s.pile = [];                                                  // free pile
+    a.hand = [card("3", "S"), card("8", "S"), card("8", "H"), card("8", "D"), card("8", "C")];
     const act = planTurn(s);
-    expect(act.cardIds).toContain("7S");                          // cheapest card above a 6
+    expect(act.cardIds.slice().sort()).toEqual(["8C", "8D", "8H", "8S"]);
+    applyAction(s, act);
+    expect(s.lastEvent.burned).toBe(true);
+    expect(s.pile.length).toBe(0);
+  });
+
+  it("resets a high pile with a cheap 2 rather than spending a high card", () => {
+    const s = playGame();
+    const a = s.players[0];
+    s.pile = [card("K", "S")];                                    // a king is showing
+    a.hand = [card("2", "C"), card("A", "H")];                    // could climb with the ace, or reset
+    const act = planTurn(s);
+    expect(act.cardIds).toEqual(["2C"]);                          // keep the ace, dump the disposable 2
+  });
+
+  it("does not waste a 2 on a low pile — climbs cheaply and hoards the 2", () => {
+    const s = playGame();
+    const a = s.players[0];
+    s.pile = [card("4", "S")];                                    // a low card is showing
+    a.hand = [card("2", "C"), card("6", "H"), card("9", "D")];
+    const act = planTurn(s);
+    expect(act.cardIds).toEqual(["6H"]);                          // cheapest plain climb, 2 stays in reserve
   });
 });
 
