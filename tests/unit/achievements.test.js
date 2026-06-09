@@ -80,6 +80,79 @@ describe("wild-label-off achievements", () => {
   });
 });
 
+describe("round-dominance achievements", () => {
+  const sweep = (over) => summary({
+    roundHistory: [
+      { round: 1, winnerIdx: 0, cumulative: [0, 30], scores: [0, 30] },
+      { round: 2, winnerIdx: 0, cumulative: [0, 60], scores: [0, 30] },
+      { round: 3, winnerIdx: 0, cumulative: [0, 90], scores: [0, 30] },
+    ],
+    ...over,
+  });
+  it("clean_sweep when the player wins every round (3+)", () => {
+    expect(earnedFor(0, sweep())).toContain("clean_sweep");
+  });
+  it("no clean_sweep if a single round was lost", () => {
+    const sum = sweep({
+      roundHistory: [
+        { round: 1, winnerIdx: 0, cumulative: [0, 30] },
+        { round: 2, winnerIdx: 1, cumulative: [30, 30] },
+        { round: 3, winnerIdx: 0, cumulative: [30, 60] },
+      ],
+    });
+    expect(earnedFor(0, sum)).not.toContain("clean_sweep");
+  });
+  it("magnificent_seven at 7 round wins, unstoppable at 5 straight", () => {
+    const rounds = Array.from({ length: 7 }, (_, i) => ({ round: i + 1, winnerIdx: 0, cumulative: [0, 0] }));
+    const ids = earnedFor(0, summary({ roundHistory: rounds }));
+    expect(ids).toContain("magnificent_seven");
+    expect(ids).toContain("unstoppable");
+  });
+  it("opening_act when first to open in 5 rounds", () => {
+    const rounds = Array.from({ length: 5 }, (_, i) => ({ round: i + 1, winnerIdx: 1, openedOrder: [0, 1] }));
+    const sum = summary({ matchEvents: { opens: [], discards: [], rounds, setsPlayed: [], pickups: [] } });
+    expect(earnedFor(0, sum)).toContain("opening_act");
+  });
+});
+
+describe("card-play achievements", () => {
+  it("wild_thing when going out with 3+ table wilds", () => {
+    const sum = summary({ matchEvents: { opens: [], discards: [], rounds: [{ winnerIdx: 0, winnerWildsOnTable: 3 }], setsPlayed: [], pickups: [] } });
+    expect(earnedFor(0, sum)).toContain("wild_thing");
+  });
+  it("magpie after 5 discard pickups", () => {
+    const pickups = Array.from({ length: 5 }, () => ({ playerIdx: 0, rank: "5", suit: "H" }));
+    const sum = summary({ matchEvents: { opens: [], discards: [], rounds: [{ winnerIdx: 0, openedOrder: [0] }], setsPlayed: [], pickups } });
+    expect(earnedFor(0, sum)).toContain("magpie");
+  });
+  it("survivor for the smallest hit in a No Way Out round", () => {
+    const sum = summary({ roundHistory: [{ round: 1, winnerIdx: null, noWayOut: true, scores: [12, 40], cumulative: [12, 40] }] });
+    expect(earnedFor(0, sum)).toContain("survivor");
+    const sum2 = summary({ roundHistory: [{ round: 1, winnerIdx: null, noWayOut: true, scores: [40, 12], cumulative: [40, 12] }] });
+    expect(earnedFor(0, sum2)).not.toContain("survivor");
+  });
+});
+
+describe("lifetime/meta achievements", () => {
+  const profiles = (matchHistory) => ({ players: { p0: { matchHistory, achievements: [] } } });
+  it("champion on a 10th win in the mode", () => {
+    const hist = Array.from({ length: 9 }, () => ({ mode: "cpu", position: 1 }));
+    expect(evaluateMatch(summary(), profiles(hist))[0]).toContain("champion");
+  });
+  it("seasoned on a 25th match in the mode", () => {
+    const hist = Array.from({ length: 24 }, () => ({ mode: "cpu", position: 3 }));
+    expect(evaluateMatch(summary(), profiles(hist))[0]).toContain("seasoned");
+  });
+  it("on_a_roll after 2 prior straight wins (this win makes 3)", () => {
+    const hist = [{ mode: "cpu", position: 1 }, { mode: "cpu", position: 1 }, { mode: "cpu", position: 2 }];
+    expect(evaluateMatch(summary(), profiles(hist))[0]).toContain("on_a_roll");
+  });
+  it("on_a_roll breaks the streak on an intervening loss", () => {
+    const hist = [{ mode: "cpu", position: 1 }, { mode: "cpu", position: 2 }, { mode: "cpu", position: 1 }];
+    expect(evaluateMatch(summary(), profiles(hist))[0]).not.toContain("on_a_roll");
+  });
+});
+
 describe("registry sanity", () => {
   it("every achievement has a unique id and an evaluate fn", () => {
     const ids = ACHIEVEMENTS.map(a => a.id);
