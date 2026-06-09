@@ -333,7 +333,7 @@ function chooseDiscard(state, difficulty) {
 
   // Opponent modelling — read once per discard call.
   const threat = maxOpponentThreat(state);
-  const endgame = threat >= 80;          // someone has ≤2 cards left
+  const endgame = threat >= 70;          // opponent on ≤2 cards, or ≤3 with melds down
   // Threat scaling: a 1.0x multiplier at default, ramping up to ~2.0x in
   // endgame so the CPU stops gifting adds even at the cost of higher hand
   // value remaining.
@@ -354,7 +354,10 @@ function chooseDiscard(state, difficulty) {
   }
 
   const candidates = pool.map(card => {
-    let badness = -pointValue(card, wildRank); // unloading high value = good (lower badness)
+    // Unloading high value = good (lower badness). In the endgame the round is
+    // about to be scored against us, so weight raw points harder — getting
+    // caught with cheap cards is the whole game once we can't win the race.
+    let badness = -pointValue(card, wildRank) * (endgame ? 1.6 : 1);
     // A card playable onto any table meld, and any buried wildcard it could
     // swap free, are gifts to whichever opened opponent picks the card up.
     const fitsAnySet = openedOpps.length > 0 &&
@@ -379,11 +382,12 @@ function chooseDiscard(state, difficulty) {
       badness += (difficulty === "hard" ? 60 : 30) * threatMult;
     }
     if (difficulty === "hard") {
-      // Keeping pairs/adjacent cards is more valuable on hard.
-      const sameRank = me.hand.filter(c => c.rank === card.rank).length;
-      if (sameRank >= 2) badness += 8;
-      const adj = me.hand.some(c => c.suit === card.suit && Math.abs(rankVal(c.rank) - rankVal(card.rank)) === 1);
-      if (adj) badness += 4;
+      // Keeping pairs/adjacent cards is more valuable on hard: cost each
+      // candidate by how much meld potential the remaining hand loses without
+      // it (pairs, touching/one-gap suited neighbours — same scoring the
+      // shape-aware opener uses).
+      const rest = me.hand.filter(c => c.id !== card.id);
+      badness += (handShapeScore(me.hand, wildRank) - handShapeScore(rest, wildRank)) * 2;
       // Hoarded-rank avoidance: only meaningful once the opponent has done
       // enough discarding to give a real signal (≥4 of their own), and even
       // then only a light nudge — we don't want it to override the basic
@@ -471,9 +475,9 @@ function chooseBestPlay(candidates, state, difficulty) {
     if (difficulty === "hard") {
       aScore += safetyScoreForArrangement(a.arrangement, state, meIdx);
       bScore += safetyScoreForArrangement(b.arrangement, state, meIdx);
-      // Prefer runs over number sets when tied — runs accept future adds.
-      if (a.kind === "run") aScore += 2;
-      if (b.kind === "run") bScore += 2;
+      // No run-vs-number preference: a run we lay accepts future adds from
+      // opponents just as readily as from us (no ownership check), so the
+      // old "runs keep taking adds" nudge benchmarked as a wash at best.
     }
     return bScore - aScore;
   })[0];
@@ -551,17 +555,17 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
       }
       // Not going out this turn — decide which set (if any) is worth laying.
       const threat = maxOpponentThreat(v);
-      const endgame = threat >= 80;
+      const endgame = threat >= 70;
       let chosen = null;
 
       if (difficulty === "easy") {
         // Easy stays simple: least wild-heavy option, else the top play.
         chosen = reps.find(p => p.wildCount * 2 <= p.cardIds.length) || reps[0];
       } else if (endgame) {
-        // An opponent is about to go out: shed the most cards (and value) we
-        // can — wildcards included — since minimising what we're caught
-        // holding beats hoarding flexibility for a round that's ending now.
-        reps.sort((a, b) => (b.cardIds.length - a.cardIds.length) || (b.valueFreed - a.valueFreed));
+        // An opponent is about to go out: shed the most VALUE we can —
+        // wildcards included — since the round is about to be scored against
+        // whatever we're caught holding. Points first, card count second.
+        reps.sort((a, b) => (b.valueFreed - a.valueFreed) || (b.cardIds.length - a.cardIds.length));
         chosen = reps[0];
       } else {
         // #1 Hard floor: never lay a set that's majority wildcards — burying
@@ -586,7 +590,7 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
             for (const p of cands) {
               const ids = new Set(p.cardIds);
               const remaining = me.hand.filter(c => !ids.has(c.id));
-              const score = p.valueFreed + handShapeScore(remaining, wildRank) + (p.kind === "run" ? 2 : 0);
+              const score = p.valueFreed + handShapeScore(remaining, wildRank);
               if (score > best) { best = score; chosen = p; }
             }
           } else {
@@ -605,7 +609,7 @@ function applyPlayAndAddLoop(initialState, actions, difficulty, shed = false) {
 
     if (me.hasOpened) {
       let adds = enumerateAdditions(me.hand, v.table, wildRank).filter(a => me.hand.length - 1 >= 1);
-      const endgameNow = maxOpponentThreat(v) >= 80;
+      const endgameNow = maxOpponentThreat(v) >= 70;
       // Wildcard discipline (the big one): a benny in hand is go-out fuel — it
       // fills any gap and is 15 points if we're caught with it. enumerateAdditions
       // happily offers wild "adds" and, scoring each at its 15-point value, sorts
@@ -685,7 +689,7 @@ function planAfterDraw(state, actions, difficulty) {
       // reclaim with genuine breathing room and no imminent out; this mirrors
       // the discard-hoard taper, which hoards a swap-key fully only at >=5 cards.
       if (me.hand.length < 5) break;
-      if (maxOpponentThreat(v) >= 80) break;
+      if (maxOpponentThreat(v) >= 70) break;
       const swaps = enumerateSwaps(me.hand, v.table, wildRank);
       if (!swaps.length) break;
       const s = swaps[0];
@@ -724,7 +728,7 @@ function wantsDiscardTop(state, top, difficulty) {
     // is about to go out — getting caught with the extra card costs more than
     // the pair is worth.
     const sameRank = me.hand.filter(c => c.rank === top.rank).length;
-    if (sameRank >= 1 && maxOpponentThreat(state) < 80) return true;
+    if (sameRank >= 1 && maxOpponentThreat(state) < 70) return true;
   }
   return false;
 }
