@@ -3,8 +3,8 @@
 //
 // Every achievement carries a `tier` (easy | medium | hard | rare). The set is
 // balanced to roughly 30% easy / 40% medium / 25% hard / 5% rare so there's
-// always something within reach and something to chase. Current mix (24 total):
-//   easy 7 (29%) · medium 10 (42%) · hard 6 (25%) · rare 1 (4%).
+// always something within reach and something to chase. Current mix (34 total):
+//   easy 8 (24%) · medium 14 (41%) · hard 10 (29%) · rare 2 (6%).
 
 export const ACHIEVEMENTS = [
   // ---- easy: most players trip these in their first games -------------------
@@ -15,6 +15,7 @@ export const ACHIEVEMENTS = [
   { id: "spin_cycle", tier: "easy", icon: "🌀", name: "Spin Cycle", desc: "Play an 8 to shake up the table.", test: (s) => s.eights >= 1 },
   { id: "survivor", tier: "easy", icon: "🛟", name: "Survivor", desc: "Win a game even after picking up the pile.", test: (s) => s.place === 1 && s.pickups >= 1 },
   { id: "off_the_hook", tier: "easy", icon: "🎣", name: "Off the Hook", desc: "Finish a 3+ player game without being the Sh!thead.", test: (s) => !s.isShithead && s.total >= 3 },
+  { id: "up_in_flames", tier: "easy", icon: "💥", name: "Up in Flames", desc: "Burn the pile for the first time.", test: (s) => s.burns >= 1 },
 
   // ---- medium: a bit of skill, the right cards, or a few games ---------------
   { id: "four_play", tier: "medium", icon: "🍀", name: "Four Play", desc: "Burn the pile with a four-of-a-kind.", test: (s) => s.fourKinds >= 1 },
@@ -25,14 +26,19 @@ export const ACHIEVEMENTS = [
   { id: "dumpster_dive", tier: "medium", icon: "🚛", name: "Dumpster Dive", desc: "Scoop up a monster pile of 12+ cards at once.", test: (s) => s.maxPickup >= 12 },
   { id: "comeback_kid", tier: "medium", icon: "🚀", name: "Comeback Kid", desc: "Win after picking up a pile of 10+ cards.", test: (s) => s.place === 1 && s.maxPickup >= 10 },
   { id: "no_laughing", tier: "medium", icon: "🛡️", name: "No Laughing Matter", desc: "Deflect a joker with a 3.", test: (s) => s.deflects >= 1 },
+  { id: "send_in_clowns", tier: "medium", icon: "🤡", name: "Send in the Clowns", desc: "Drop 2 jokers on opponents in a single game.", test: (s) => s.jokers >= 2 },
+  { id: "trash_panda", tier: "medium", icon: "🦝", name: "Trash Panda", desc: "Pick up the pile 3+ times and still dodge the Sh!thead title.", test: (s) => s.pickups >= 3 && !s.isShithead },
 
   // ---- hard: real skill or a specific tough condition -----------------------
   { id: "clean_hands", tier: "hard", icon: "🧼", name: "Clean Hands", desc: "Win a game without ever picking up the pile.", test: (s) => s.place === 1 && s.pickups === 0 },
   { id: "pyromaniac", tier: "hard", icon: "🔥", name: "Pyromaniac", desc: "Burn the pile 3+ times in one game.", test: (s) => s.burns >= 3 },
   { id: "hard_mode", tier: "hard", icon: "😈", name: "No Mercy", desc: "Win a game against a Hard CPU.", test: (s) => s.place === 1 && s.difficulty === "hard" },
+  { id: "quad_squad", tier: "hard", icon: "🧨", name: "Quad Squad", desc: "Lay four of a kind in a single move.", test: (s) => s.bigPlay >= 4 },
+  { id: "purist", tier: "hard", icon: "🚫", name: "Purist", desc: "Win without playing a single power card (2, 8, 10 or joker).", test: (s) => s.place === 1 && s.twos === 0 && s.eights === 0 && s.tens === 0 && s.jokers === 0 },
 
   // ---- rare: lucky and hard-won ---------------------------------------------
   { id: "blind_luck", tier: "rare", icon: "🙈", name: "Blind Luck", desc: "Win by playing your last face-down card.", test: (s) => s.place === 1 && s.wonOnBlind },
+  { id: "flawless", tier: "rare", icon: "😤", name: "Flawless Victory", desc: "Beat a Hard CPU without ever picking up the pile.", test: (s) => s.place === 1 && s.difficulty === "hard" && s.pickups === 0 },
 ];
 
 // Lifetime "progress" achievements — fill a bar over many games. `value(prof)`
@@ -43,6 +49,10 @@ export const PROGRESS_ACHIEVEMENTS = [
   { id: "champion", tier: "hard", icon: "👑", name: "Champion", desc: "Win 10 games.", target: 10, value: (p) => p.stats.wins },
   { id: "arsonist", tier: "hard", icon: "🔥", name: "Arsonist", desc: "Burn the pile 50 times.", target: 50, value: (p) => p.progress.burns },
   { id: "court_jester", tier: "hard", icon: "🃏", name: "Court Jester", desc: "Drop 15 jokers on opponents.", target: 15, value: (p) => p.progress.jokers },
+  { id: "bin_man", tier: "medium", icon: "🚮", name: "Bin Man", desc: "Pick up the pile 25 times.", target: 25, value: (p) => p.progress.pickups },
+  { id: "perfect_tens", tier: "medium", icon: "💯", name: "Perfect Tens", desc: "Play 25 tens.", target: 25, value: (p) => p.progress.tens },
+  { id: "centurion", tier: "hard", icon: "🏛️", name: "Centurion", desc: "Play 100 games.", target: 100, value: (p) => p.stats.games },
+  { id: "riposte", tier: "hard", icon: "🤺", name: "Riposte", desc: "Deflect 10 jokers with a 3.", target: 10, value: (p) => p.progress.deflects },
 ];
 
 const BY_ID = new Map([...ACHIEVEMENTS, ...PROGRESS_ACHIEVEMENTS].map((a) => [a.id, a]));

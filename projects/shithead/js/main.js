@@ -584,7 +584,7 @@ function floatLabel(text) {
 
 // Achievements that can be settled mid-game (no dependence on final place /
 // Sh!thead status) — toast them the moment they're earned for instant feedback.
-const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing", "spin_cycle", "hat_trick", "dumpster_dive"]);
+const LIVE_ACH = new Set(["reset_button", "pyromaniac", "four_play", "jokers_wild", "no_laughing", "spin_cycle", "hat_trick", "dumpster_dive", "up_in_flames", "send_in_clowns", "quad_squad"]);
 function maybeToastAchievements() {
   const e = state && state.lastEvent;
   if (!e || !e.playerId) return;
