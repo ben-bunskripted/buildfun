@@ -14,6 +14,10 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const SW_PATH = "projects/benny-card-game/sw.js";
+// The in-app version stamp (main.js:APP_BUILD) must equal the SW cache version,
+// or renderVersionStamp() shows a permanent "refresh to update" nag even when
+// the client is current. This pair has drifted apart twice — guard it here.
+const MAIN_PATH = "projects/benny-card-game/js/main.js";
 // Files served through the cache-first service worker. A change to any of these
 // requires a cache bump. sw.js itself is excluded — it's where the bump lives.
 const SHELL_RE = /^projects\/benny-card-game\/.*\.(js|css|html|webmanifest)$/;
@@ -27,6 +31,10 @@ function extractCache(src) {
   const m = src && src.match(/const\s+CACHE\s*=\s*["'`]([^"'`]+)["'`]/);
   return m ? m[1] : null;
 }
+function extractAppBuild(src) {
+  const m = src && src.match(/const\s+APP_BUILD\s*=\s*["'`]([^"'`]+)["'`]/);
+  return m ? m[1] : null;
+}
 function ok(msg) { console.log(`[cache-bump] ${msg}`); process.exit(0); }
 function fail(msg) { console.error(`[cache-bump] FAIL: ${msg}`); process.exit(1); }
 
@@ -34,6 +42,26 @@ function fail(msg) { console.error(`[cache-bump] FAIL: ${msg}`); process.exit(1)
 // checkout that didn't fetch it) rather than blocking on infrastructure.
 try { git(`rev-parse --verify ${base}^{commit}`); }
 catch { ok(`base ref '${base}' not found — skipping check.`); }
+
+// Unconditional sync check: APP_BUILD must equal the cache version (sans the
+// "benny-" prefix), regardless of what this PR touched. A drift is always a bug
+// — it pins the version stamp to a permanent "refresh to update" nag — and it
+// has crept in twice by bumping CACHE without bumping APP_BUILD.
+const headCacheForSync = extractCache(readFileSync(SW_PATH, "utf8"));
+const headAppBuild = extractAppBuild(readFileSync(MAIN_PATH, "utf8"));
+if (!headAppBuild) {
+  fail(`couldn't find the APP_BUILD constant in ${MAIN_PATH} — has its format changed?`);
+}
+const cacheVersion = headCacheForSync && headCacheForSync.replace(/^benny-/, "");
+if (cacheVersion !== headAppBuild) {
+  fail(
+    `APP_BUILD is out of sync with the service-worker CACHE.\n` +
+    `  CACHE   = "${headCacheForSync}" (version "${cacheVersion}") in ${SW_PATH}\n` +
+    `  APP_BUILD = "${headAppBuild}" in ${MAIN_PATH}\n` +
+    `  These must match or the in-app version stamp shows a permanent "refresh to\n` +
+    `  update" nag. Fix: set APP_BUILD = "${cacheVersion}".`,
+  );
+}
 
 const mergeBase = git(`merge-base ${base} HEAD`);
 const changed = git(`diff --name-only ${mergeBase} HEAD`).split("\n").filter(Boolean);
