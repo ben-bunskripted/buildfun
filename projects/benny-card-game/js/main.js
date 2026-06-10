@@ -1736,10 +1736,12 @@ function wireUp() {
       onPlaceholderMove: layoutHand,
       // The drag is over — flush any hand render that was deferred while the
       // card was lifted (see pendingHandRender). The commit callbacks above
-      // (onReorder / onDropOnTarget) usually re-render on their own, but a
-      // cancelled or no-op drop wouldn't, leaving the deferred state pending.
-      onDragEnd: () => {
-        if (pendingHandRender) {
+      // (onReorder / onDropOnTarget) re-render on their own; for any other
+      // drag end (cancelled, no-op, or one we had to abort because the node
+      // went stale), reconcile the hand DOM from state so no orphaned/lifted
+      // node or duplicate can linger.
+      onDragEnd: ({ dragged, committed } = {}) => {
+        if (pendingHandRender || (dragged && !committed)) {
           pendingHandRender = false;
           renderHand();
         }
@@ -3612,7 +3614,7 @@ function renderLobbyRoster(players, server) {
 // worker cache key (the thing that actually gates asset freshness): if it
 // disagrees with this constant, the client is serving stale cached assets and
 // the stamp flags it in red.
-const APP_BUILD = "v90";
+const APP_BUILD = "v91";
 
 // Display the build as dot-separated digits, zero-padded to 3 ("v74" -> "v.0.7.4").
 function formatBuild(ver) {
