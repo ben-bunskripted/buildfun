@@ -62,7 +62,12 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     //   suit, length and wild count so we can score suit/rank/run achievements.
     // `pickups`: every draw from the discard pile (public info — read by the
     //   hard CPU to avoid feeding ranks an opponent is visibly collecting).
-    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [] },
+    // `moveLog`: a single ordered transcript of every move made in the match —
+    //   draws, plays, adds, swaps, discards and round boundaries — used to
+    //   produce the downloadable per-match log. Records only public info: a
+    //   deck draw notes that a draw happened but never the card's identity
+    //   (it's hidden from spectators in online play and never persisted here).
+    matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [], moveLog: [] },
   };
 }
 
@@ -98,6 +103,7 @@ export function startNextRound(state, opts = {}) {
   state.currentPlayerIndex = state.dealerIndex;
   state.dealerOpeningPending = true;
   state.phase = "passing";
+  logMove(state, { type: "roundStart", playerIdx: state.dealerIndex, dealerIdx: state.dealerIndex });
   return state;
 }
 
@@ -134,6 +140,9 @@ export function drawFromDeck(state) {
   p.drawsThisRound = (p.drawsThisRound || 0) + 1;
   state.lastDrawnCardId = card.id;
   state.phase = "canAct";
+  // Log the draw but NOT the card — its identity is hidden info (the move log
+  // is sent to every seat in online play and must not leak the deck).
+  logMove(state, { type: "drawDeck", playerIdx: state.currentPlayerIndex });
   return { ok: true, card };
 }
 
@@ -153,6 +162,11 @@ export function drawFromDiscard(state) {
     playerIdx: state.currentPlayerIndex,
     rank: card.rank,
     suit: card.suit,
+  });
+  logMove(state, {
+    type: "drawDiscard",
+    playerIdx: state.currentPlayerIndex,
+    card: { rank: card.rank, suit: card.suit },
   });
 
   return { ok: true, card };
@@ -202,16 +216,54 @@ export function placeNewSet(state, arrangement) {
   player.hasOpened = true;
   if (wasFirstOpen) recordOpen(state, state.currentPlayerIndex);
   recordSetPlayed(state, set, "open");
+  logMove(state, {
+    type: "play",
+    playerIdx: state.currentPlayerIndex,
+    setId: set.id,
+    setType: set.type,
+    rank: set.type === "number" ? set.rank : undefined,
+    suit: set.type === "run" ? set.suit : undefined,
+    cards: describeMeldCards(set.cards),
+  });
   return { ok: true, set };
 }
 
 function ensureMatchEvents(state) {
   if (!state.matchEvents) {
-    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [] };
+    state.matchEvents = { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [], moveLog: [] };
     return;
   }
   if (!Array.isArray(state.matchEvents.setsPlayed)) state.matchEvents.setsPlayed = [];
   if (!Array.isArray(state.matchEvents.pickups)) state.matchEvents.pickups = [];
+  if (!Array.isArray(state.matchEvents.moveLog)) state.matchEvents.moveLog = [];
+}
+
+// Append one entry to the ordered move transcript. `seq` is a 1-based running
+// counter so the download reads as a numbered list. `round`/`wildcardRank` are
+// stamped from current state so each line is self-describing. Callers pass only
+// the move-specific fields (type, playerIdx, card details). NEVER pass the
+// identity of a card drawn from the deck — it's hidden info (see redaction).
+function logMove(state, entry) {
+  ensureMatchEvents(state);
+  state.matchEvents.moveLog.push({
+    seq: state.matchEvents.moveLog.length + 1,
+    round: state.round,
+    wildcardRank: state.wildcardRank,
+    ...entry,
+  });
+}
+
+// Flatten an arrangement's card entries into a compact, serialisable shape for
+// the move log: the natural rank/suit plus, for wildcards, what they stand in
+// for. These cards are all public — they're being laid on the table.
+function describeMeldCards(cards) {
+  return cards.map(c => {
+    const out = { rank: c.card.rank, suit: c.card.suit, isWild: !!c.isWild };
+    if (c.isWild && (c.representsRank || c.representsSuit)) {
+      out.represents = { rank: c.representsRank, suit: c.representsSuit };
+    }
+    return out;
+  });
 }
 
 function recordOpen(state, playerIdx) {
@@ -257,6 +309,15 @@ export function addToSet(state, setId, arrangement) {
     player.hand = player.hand.filter(c => !cardIds.includes(c.id));
     set.cards.push(...arrangement.added);
     recordSetPlayed(state, set, "extend");
+    logMove(state, {
+      type: "add",
+      playerIdx: state.currentPlayerIndex,
+      setId: set.id,
+      setType: set.type,
+      rank: set.rank,
+      ownerIndex: set.ownerIndex,
+      cards: describeMeldCards(arrangement.added),
+    });
     return { ok: true };
   }
 
@@ -285,6 +346,15 @@ export function addToSet(state, setId, arrangement) {
     return out;
   });
   recordSetPlayed(state, set, "extend");
+  logMove(state, {
+    type: "add",
+    playerIdx: state.currentPlayerIndex,
+    setId: set.id,
+    setType: set.type,
+    suit: set.suit,
+    ownerIndex: set.ownerIndex,
+    cards: describeMeldCards(arrangement.added),
+  });
   return { ok: true };
 }
 
@@ -311,6 +381,14 @@ export function swapWildcard(state, setId, positionIndex, naturalCardId) {
   player.hand.splice(naturalIdx, 1);
   player.hand.push(target.card); // wildcard returns to hand
   state.lastDrawnCardId = target.card.id; // highlight the newly held wildcard
+  logMove(state, {
+    type: "swap",
+    playerIdx: state.currentPlayerIndex,
+    setId: set.id,
+    ownerIndex: set.ownerIndex,
+    natural: { rank: natural.rank, suit: natural.suit },
+    represents: { rank: target.representsRank, suit: target.representsSuit },
+  });
   return { ok: true };
 }
 
@@ -333,6 +411,12 @@ export function discard(state, cardId) {
     playerIdx: state.currentPlayerIndex,
     rank: card.rank,
     suit: card.suit,
+    wasWild: card.rank === state.wildcardRank,
+  });
+  logMove(state, {
+    type: "discard",
+    playerIdx: state.currentPlayerIndex,
+    card: { rank: card.rank, suit: card.suit },
     wasWild: card.rank === state.wildcardRank,
   });
 
@@ -406,6 +490,13 @@ function finalizeRoundScoring(state) {
     dealerIdx: state.dealerIndex,
     openedOrder: opensThisRound.map(o => o.playerIdx),
     winnerWildsOnTable,
+  });
+  logMove(state, {
+    type: "roundEnd",
+    playerIdx: state.roundWinner,
+    winnerIdx: state.roundWinner,
+    scores: state.perRoundScores.slice(),
+    cumulative: state.players.map(p => p.score),
   });
 }
 
@@ -511,6 +602,14 @@ export function finalizeNoWayOut(state) {
     openedOrder: state.matchEvents.opens.filter(o => o.round === state.round).map(o => o.playerIdx),
     winnerWildsOnTable: 0,
     noWayOut: true,
+  });
+  logMove(state, {
+    type: "roundEnd",
+    playerIdx: null,
+    winnerIdx: null,
+    noWayOut: true,
+    scores: state.perRoundScores.slice(),
+    cumulative: state.players.map(p => p.score),
   });
   state.roundWinner = null;
   state.phase = "roundOver";
