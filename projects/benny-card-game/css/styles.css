@@ -1190,12 +1190,23 @@ html.hide-wild .card.is-wild .wild-banner { display: none; }
 .profile-history-table td { font-variant-numeric: tabular-nums; }
 .profile-history-table tr.winner-row td:first-child::before { content: "🏆 "; }
 
-/* Per-row "Download" button in the Recent matches table. */
+/* Per-row "Download" button in the Recent matches table. The base .pill is
+   white-on-translucent, which is invisible against the light table — override
+   to dark text on a solid light fill so it reads clearly. */
 .pill.tiny {
   padding: 3px 10px; font-size: 12px; line-height: 1.2;
   border-radius: 999px;
 }
-.log-download-btn { white-space: nowrap; }
+.log-download-btn {
+  white-space: nowrap;
+  color: #000;
+  background: rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.25);
+}
+.log-download-btn:hover {
+  background: rgba(0,0,0,0.12);
+  color: #000;
+}
 
 .achievements-grid {
   display: grid; grid-template-columns: 1fr; gap: 6px;

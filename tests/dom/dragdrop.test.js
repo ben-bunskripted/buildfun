@@ -105,3 +105,69 @@ describe("makeHandReorderable — hand rebuilt mid-drag", () => {
     expect(document.body.classList.contains("hand-dragging")).toBe(false);
   });
 });
+
+describe("makeHandReorderable — card detached before the drag starts", () => {
+  beforeEach(() => { document.body.innerHTML = ""; });
+
+  it("re-resolves to the live node when a render replaced the captured card", () => {
+    const hand = buildHand(["AS", "2S", "3S"]);
+    const reorders = [];
+    let endArg = null;
+    makeHandReorderable(hand, (from, to) => reorders.push([from, to]), {
+      onDragEnd: (a) => { endArg = a; },
+    });
+
+    // Capture the card on pointerdown, then rebuild the hand (new nodes) BEFORE
+    // the drag actually starts — mimicking a card landing in the hand during a
+    // long press. The originally-captured node is now detached.
+    const captured = hand.children[0];
+    captured.dispatchEvent(pointer("pointerdown", { clientX: 0, clientY: 0 }));
+    hand.innerHTML = "";
+    hand.appendChild(makeCard("AS"));
+    hand.appendChild(makeCard("2S"));
+    hand.appendChild(makeCard("3S"));
+    expect(captured.isConnected).toBe(false);
+
+    // Movement past threshold triggers the drag; it should re-resolve to the
+    // live "AS" node and proceed normally.
+    window.dispatchEvent(pointer("pointermove", { clientX: 40, clientY: 0 }));
+    window.dispatchEvent(pointer("pointerup", { clientX: 40, clientY: 0 }));
+
+    const ids = [...hand.children].map(c => c.dataset.cardId).sort();
+    expect(ids).toEqual(["2S", "3S", "AS"]);                 // no duplicate
+    expect(ids.filter(id => id === "AS")).toHaveLength(1);
+    expect(hand.querySelectorAll(".drag-placeholder")).toHaveLength(0);
+    expect(document.body.querySelector("body > .card.dragging")).toBeNull();
+    expect(document.body.classList.contains("hand-dragging")).toBe(false);
+    expect(reorders).toHaveLength(1);                        // drag committed
+    expect(endArg).toMatchObject({ dragged: true, committed: true });
+  });
+
+  it("aborts cleanly when the captured card has left the hand entirely", () => {
+    const hand = buildHand(["AS", "2S", "3S"]);
+    const reorders = [];
+    let endArg = null;
+    makeHandReorderable(hand, (from, to) => reorders.push([from, to]), {
+      onDragEnd: (a) => { endArg = a; },
+    });
+
+    const captured = hand.children[0];
+    captured.dispatchEvent(pointer("pointerdown", { clientX: 0, clientY: 0 }));
+    // The captured card is gone from the hand (e.g. it was just played/discarded).
+    hand.innerHTML = "";
+    hand.appendChild(makeCard("2S"));
+    hand.appendChild(makeCard("3S"));
+
+    window.dispatchEvent(pointer("pointermove", { clientX: 40, clientY: 0 }));
+    window.dispatchEvent(pointer("pointerup", { clientX: 40, clientY: 0 }));
+
+    // Nothing lifted, nothing duplicated, no leftover drag state.
+    const ids = [...hand.children].map(c => c.dataset.cardId).sort();
+    expect(ids).toEqual(["2S", "3S"]);
+    expect(hand.querySelectorAll(".drag-placeholder")).toHaveLength(0);
+    expect(document.body.querySelector("body > .card")).toBeNull();
+    expect(document.body.classList.contains("hand-dragging")).toBe(false);
+    expect(reorders).toHaveLength(0);
+    expect(endArg).toMatchObject({ dragged: false, committed: false });
+  });
+});

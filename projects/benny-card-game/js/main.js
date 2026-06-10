@@ -1586,6 +1586,7 @@ const MENU_ACTIONS = {
   rules: openRules,
   feedback: openFeedback,
   exit: exitToStart,
+  "download-log": downloadCurrentMatchLog,
   fan: () => {
     ui.handFanned = !ui.handFanned;
     savePrefs({ ...loadPrefs(), handFanned: ui.handFanned });
@@ -1735,10 +1736,12 @@ function wireUp() {
       onPlaceholderMove: layoutHand,
       // The drag is over — flush any hand render that was deferred while the
       // card was lifted (see pendingHandRender). The commit callbacks above
-      // (onReorder / onDropOnTarget) usually re-render on their own, but a
-      // cancelled or no-op drop wouldn't, leaving the deferred state pending.
-      onDragEnd: () => {
-        if (pendingHandRender) {
+      // (onReorder / onDropOnTarget) re-render on their own; for any other
+      // drag end (cancelled, no-op, or one we had to abort because the node
+      // went stale), reconcile the hand DOM from state so no orphaned/lifted
+      // node or duplicate can linger.
+      onDragEnd: ({ dragged, committed } = {}) => {
+        if (pendingHandRender || (dragged && !committed)) {
           pendingHandRender = false;
           renderHand();
         }
@@ -2730,12 +2733,31 @@ function downloadMatchLog(m) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `benny-match-${stamp}.txt`;
+  a.download = `benny-match-${stamp}${m.inProgress ? "-in-progress" : ""}.txt`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   // Revoke on the next tick so the download has grabbed the blob first.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Mid-game download: build a transcript row from the live match state and reuse
+// downloadMatchLog. Available from the play-screen menu so a match in progress
+// can be exported without waiting for it to finish. Scoring mode has no
+// card-level moves, so this is wired only to the play menu.
+function downloadCurrentMatchLog() {
+  if (!state) { toast("No match in progress."); return; }
+  const log = (state.matchEvents && state.matchEvents.moveLog) || [];
+  if (!log.length) { toast("No moves to download yet."); return; }
+  downloadMatchLog({
+    date: new Date().toISOString(),
+    mode: state.mode,
+    totalPlayers: state.players.length,
+    players: state.players.map(p => p.name),
+    moveLog: log,
+    roundHistory: state.roundHistory || [],
+    inProgress: true,
+  });
 }
 
 function cardLabel(c) {
@@ -2768,6 +2790,7 @@ function buildMatchLogText(m) {
   const date = new Date(m.date);
   L.push(`Date: ${isNaN(date) ? "—" : date.toLocaleString()}`);
   L.push(`Mode: ${MODE_LABELS[m.mode] || m.mode}`);
+  if (m.inProgress) L.push("Status: in progress (match not finished)");
   if (names.length) L.push(`Players: ${names.join(", ")}`);
   if (typeof m.playerIdx === "number") {
     L.push(`You: ${nameOf(m.playerIdx)} — ${ordinal(m.position)} of ${m.totalPlayers}, ${m.finalScore} points`);
@@ -2775,6 +2798,9 @@ function buildMatchLogText(m) {
   L.push("");
 
   let lastRound = null;
+  // Number only the printed move lines, contiguously (1, 2, 3, …). The stored
+  // ev.seq counts round markers too, which would leave confusing gaps.
+  let moveNum = 0;
   for (const ev of (m.moveLog || [])) {
     if (ev.type === "roundStart") {
       L.push(`=== Round ${ev.round} (wild: ${ev.wildcardRank ?? "—"}) — dealer: ${nameOf(ev.dealerIdx)} ===`);
@@ -2801,11 +2827,30 @@ function buildMatchLogText(m) {
       L.push(`=== Round ${ev.round} (wild: ${ev.wildcardRank ?? "—"}) ===`);
       lastRound = ev.round;
     }
-    L.push(`  #${ev.seq}  ${describeMove(ev, nameOf)}`);
+    moveNum += 1;
+    L.push(`  #${moveNum}  ${describeMove(ev, nameOf)}`);
   }
   if (!(m.moveLog || []).length) L.push("(No move detail recorded for this match.)");
   L.push("");
   return L.join("\n");
+}
+
+// Describe a meld by its shape: "set of Qs" / "♥ run". Falls back to "meld"
+// for older logs that didn't record the target's rank/suit (e.g. pre-upgrade
+// swap entries).
+function meldDescriptor(ev) {
+  if (ev.suit) return `${SUIT_GLYPH[ev.suit] || ev.suit} run`;
+  if (ev.rank) return `set of ${ev.rank}s`;
+  return "meld";
+}
+
+// Name the meld an add/swap landed on, attributing ownership: "Jon's ♥ run"
+// for another player's meld, "their own set of Qs" for the actor's own.
+function meldTarget(ev, nameOf) {
+  const d = meldDescriptor(ev);
+  return (ev.ownerIndex != null && ev.ownerIndex !== ev.playerIdx)
+    ? `${nameOf(ev.ownerIndex)}'s ${d}`
+    : `their own ${d}`;
 }
 
 function describeMove(ev, nameOf) {
@@ -2819,14 +2864,10 @@ function describeMove(ev, nameOf) {
       const kind = ev.setType === "run" ? `run${ev.suit ? " " + (SUIT_GLYPH[ev.suit] || ev.suit) : ""}` : `set of ${ev.rank}s`;
       return `${who} laid down a ${kind}: ${meldCardLabels(ev.cards)}`;
     }
-    case "add": {
-      const target = ev.ownerIndex != null && ev.ownerIndex !== ev.playerIdx
-        ? ` to ${nameOf(ev.ownerIndex)}'s meld`
-        : "";
-      return `${who} added ${meldCardLabels(ev.cards)}${target}`;
-    }
+    case "add":
+      return `${who} added ${meldCardLabels(ev.cards)} to ${meldTarget(ev, nameOf)}`;
     case "swap":
-      return `${who} swapped in ${cardLabel(ev.natural)} for a wildcard`
+      return `${who} swapped in ${cardLabel(ev.natural)} for a wildcard in ${meldTarget(ev, nameOf)}`
         + (ev.represents && (ev.represents.rank || ev.represents.suit) ? ` (was standing in for ${cardLabel(ev.represents)})` : "");
     case "discard":
       return `${who} discarded ${cardLabel(ev.card)}${ev.wasWild ? " (a wildcard!)" : ""}`;
@@ -3591,7 +3632,7 @@ function renderLobbyRoster(players, server) {
 // worker cache key (the thing that actually gates asset freshness): if it
 // disagrees with this constant, the client is serving stale cached assets and
 // the stamp flags it in red.
-const APP_BUILD = "v89";
+const APP_BUILD = "v93";
 
 // Display the build as dot-separated digits, zero-padded to 3 ("v74" -> "v.0.7.4").
 function formatBuild(ver) {

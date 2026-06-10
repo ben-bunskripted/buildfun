@@ -386,6 +386,9 @@ export function swapWildcard(state, setId, positionIndex, naturalCardId) {
     playerIdx: state.currentPlayerIndex,
     setId: set.id,
     ownerIndex: set.ownerIndex,
+    setType: set.type,
+    rank: set.type === "number" ? set.rank : undefined,
+    suit: set.type === "run" ? set.suit : undefined,
     natural: { rank: natural.rank, suit: natural.suit },
     represents: { rank: target.representsRank, suit: target.representsSuit },
   });
