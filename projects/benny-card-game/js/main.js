@@ -1586,6 +1586,7 @@ const MENU_ACTIONS = {
   rules: openRules,
   feedback: openFeedback,
   exit: exitToStart,
+  "download-log": downloadCurrentMatchLog,
   fan: () => {
     ui.handFanned = !ui.handFanned;
     savePrefs({ ...loadPrefs(), handFanned: ui.handFanned });
@@ -2730,12 +2731,31 @@ function downloadMatchLog(m) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `benny-match-${stamp}.txt`;
+  a.download = `benny-match-${stamp}${m.inProgress ? "-in-progress" : ""}.txt`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   // Revoke on the next tick so the download has grabbed the blob first.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Mid-game download: build a transcript row from the live match state and reuse
+// downloadMatchLog. Available from the play-screen menu so a match in progress
+// can be exported without waiting for it to finish. Scoring mode has no
+// card-level moves, so this is wired only to the play menu.
+function downloadCurrentMatchLog() {
+  if (!state) { toast("No match in progress."); return; }
+  const log = (state.matchEvents && state.matchEvents.moveLog) || [];
+  if (!log.length) { toast("No moves to download yet."); return; }
+  downloadMatchLog({
+    date: new Date().toISOString(),
+    mode: state.mode,
+    totalPlayers: state.players.length,
+    players: state.players.map(p => p.name),
+    moveLog: log,
+    roundHistory: state.roundHistory || [],
+    inProgress: true,
+  });
 }
 
 function cardLabel(c) {
@@ -2768,6 +2788,7 @@ function buildMatchLogText(m) {
   const date = new Date(m.date);
   L.push(`Date: ${isNaN(date) ? "—" : date.toLocaleString()}`);
   L.push(`Mode: ${MODE_LABELS[m.mode] || m.mode}`);
+  if (m.inProgress) L.push("Status: in progress (match not finished)");
   if (names.length) L.push(`Players: ${names.join(", ")}`);
   if (typeof m.playerIdx === "number") {
     L.push(`You: ${nameOf(m.playerIdx)} — ${ordinal(m.position)} of ${m.totalPlayers}, ${m.finalScore} points`);
@@ -3591,7 +3612,7 @@ function renderLobbyRoster(players, server) {
 // worker cache key (the thing that actually gates asset freshness): if it
 // disagrees with this constant, the client is serving stale cached assets and
 // the stamp flags it in red.
-const APP_BUILD = "v89";
+const APP_BUILD = "v90";
 
 // Display the build as dot-separated digits, zero-padded to 3 ("v74" -> "v.0.7.4").
 function formatBuild(ver) {
