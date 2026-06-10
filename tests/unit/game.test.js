@@ -124,6 +124,57 @@ describe("draws", () => {
   });
 });
 
+describe("matchEvents.moveLog (downloadable transcript)", () => {
+  it("records draws, a play and a discard in order, with public info only", () => {
+    const s = freshMatch(["A", "B"], { wildcardRank: "K" });
+    s.currentPlayerIndex = 0;
+    // Deck draw — must NOT leak the card identity into the log.
+    s.phase = "mustDraw";
+    s.deck = cards("2C");
+    expect(drawFromDeck(s).ok).toBe(true);
+    // Open a set.
+    s.players[0].hand = cards("5S", "5H", "5D", "9C", "2C");
+    s.phase = "canAct";
+    expect(placeNewSet(s, validateNewSet(cards("5S", "5H", "5D"), "K")).ok).toBe(true);
+    // Discard to end the turn.
+    expect(discard(s, "9C").ok).toBe(true);
+
+    const log = s.matchEvents.moveLog;
+    expect(log.map(e => e.type)).toEqual(["drawDeck", "play", "discard"]);
+    // seq is a 1-based running counter.
+    expect(log.map(e => e.seq)).toEqual([1, 2, 3]);
+    // Deck draw carries no card — its identity is hidden info.
+    expect(log[0].card).toBeUndefined();
+    // The play captures the laid-down cards (public).
+    expect(log[1].setType).toBe("number");
+    expect(log[1].cards.map(c => `${c.rank}${c.suit}`)).toEqual(["5S", "5H", "5D"]);
+    // The discard captures the card and round/wild stamp.
+    expect(log[2].card).toEqual({ rank: "9", suit: "C" });
+    expect(log[2].round).toBe(s.round);
+    expect(log[2].wildcardRank).toBe("K");
+  });
+
+  it("records a discard-pile pickup with the (public) card", () => {
+    const s = freshMatch(["A", "B"]);
+    s.phase = "mustDraw";
+    s.currentPlayerIndex = 1;
+    s.discardPile = cards("9D");
+    expect(drawFromDiscard(s).ok).toBe(true);
+    const last = s.matchEvents.moveLog.at(-1);
+    expect(last).toMatchObject({ type: "drawDiscard", playerIdx: 1, card: { rank: "9", suit: "D" } });
+  });
+
+  it("backfills moveLog on saved states that predate it", () => {
+    const s = freshMatch(["A", "B"]);
+    s.phase = "mustDraw";
+    s.currentPlayerIndex = 0;
+    s.discardPile = cards("9D");
+    delete s.matchEvents.moveLog; // pre-moveLog save shape
+    expect(drawFromDiscard(s).ok).toBe(true);
+    expect(s.matchEvents.moveLog).toHaveLength(1);
+  });
+});
+
 describe("placeNewSet", () => {
   function withHand(ids) {
     const s = freshMatch(["A", "B"], { wildcardRank: "K" });

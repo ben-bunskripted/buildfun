@@ -2685,7 +2685,7 @@ function renderProfileRecent(matches) {
   tbody.innerHTML = "";
   const rows = matches.slice(0, 10);
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="muted">No matches yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No matches yet.</td></tr>`;
     return;
   }
   for (const m of rows) {
@@ -2696,7 +2696,142 @@ function renderProfileRecent(matches) {
     const place = `${ordinal(m.position)} / ${m.totalPlayers}`;
     if (m.position === 1) tr.className = "winner-row";
     tr.innerHTML = `<td>${escapeHTML(dateStr)}</td><td>${escapeHTML(modeLabel)}</td><td>${m.finalScore}</td><td>${escapeHTML(place)}</td>`;
+    // Download cell: a button when the move log is still retained for this row
+    // (recent matches), otherwise a muted dash for older trimmed rows.
+    const logTd = document.createElement("td");
+    if (Array.isArray(m.moveLog) && m.moveLog.length) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pill tiny log-download-btn";
+      btn.textContent = "Download";
+      btn.title = "Download a move-by-move log of this match";
+      btn.addEventListener("click", () => downloadMatchLog(m));
+      logTd.appendChild(btn);
+    } else {
+      logTd.innerHTML = `<span class="muted">—</span>`;
+    }
+    tr.appendChild(logTd);
     tbody.appendChild(tr);
+  }
+}
+
+// ---------- Match move-log download ----------
+
+// Build a readable transcript of a match from a stored matchHistory row and
+// trigger a .txt download. The row carries `players` (names by index),
+// `moveLog` (ordered moves) and `roundHistory` (per-round scores).
+function downloadMatchLog(m) {
+  const text = buildMatchLogText(m);
+  const date = new Date(m.date);
+  const stamp = isNaN(date)
+    ? "match"
+    : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `benny-match-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so the download has grabbed the blob first.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function cardLabel(c) {
+  if (!c) return "?";
+  const glyph = SUIT_GLYPH[c.suit] || c.suit || "";
+  return `${c.rank}${glyph}`;
+}
+
+function meldCardLabels(cards) {
+  if (!Array.isArray(cards)) return "";
+  return cards.map(c => {
+    const base = cardLabel(c);
+    if (c.isWild) {
+      const rep = c.represents && (c.represents.rank || c.represents.suit)
+        ? ` (wild→${cardLabel(c.represents)})`
+        : " (wild)";
+      return base + rep;
+    }
+    return base;
+  }).join(" ");
+}
+
+function buildMatchLogText(m) {
+  const names = Array.isArray(m.players) && m.players.length
+    ? m.players
+    : [];
+  const nameOf = (idx) => (idx == null ? "—" : (names[idx] || `Player ${idx + 1}`));
+  const L = [];
+  L.push("Benny — Match log");
+  const date = new Date(m.date);
+  L.push(`Date: ${isNaN(date) ? "—" : date.toLocaleString()}`);
+  L.push(`Mode: ${MODE_LABELS[m.mode] || m.mode}`);
+  if (names.length) L.push(`Players: ${names.join(", ")}`);
+  if (typeof m.playerIdx === "number") {
+    L.push(`You: ${nameOf(m.playerIdx)} — ${ordinal(m.position)} of ${m.totalPlayers}, ${m.finalScore} points`);
+  }
+  L.push("");
+
+  let lastRound = null;
+  for (const ev of (m.moveLog || [])) {
+    if (ev.type === "roundStart") {
+      L.push(`=== Round ${ev.round} (wild: ${ev.wildcardRank ?? "—"}) — dealer: ${nameOf(ev.dealerIdx)} ===`);
+      lastRound = ev.round;
+      continue;
+    }
+    if (ev.type === "roundEnd") {
+      if (ev.noWayOut) {
+        L.push(`  — Round ${ev.round}: No Way Out (dead draw) —`);
+      } else {
+        L.push(`  — Round ${ev.round} won by ${nameOf(ev.winnerIdx)} —`);
+      }
+      if (Array.isArray(ev.scores)) {
+        L.push(`    This round: ${ev.scores.map((s, i) => `${nameOf(i)} ${s}`).join(", ")}`);
+      }
+      if (Array.isArray(ev.cumulative)) {
+        L.push(`    Totals: ${ev.cumulative.map((s, i) => `${nameOf(i)} ${s}`).join(", ")}`);
+      }
+      L.push("");
+      continue;
+    }
+    // Ordinary moves. Stamp a round header if one wasn't emitted (older saves).
+    if (ev.round !== lastRound && ev.type !== "roundStart") {
+      L.push(`=== Round ${ev.round} (wild: ${ev.wildcardRank ?? "—"}) ===`);
+      lastRound = ev.round;
+    }
+    L.push(`  #${ev.seq}  ${describeMove(ev, nameOf)}`);
+  }
+  if (!(m.moveLog || []).length) L.push("(No move detail recorded for this match.)");
+  L.push("");
+  return L.join("\n");
+}
+
+function describeMove(ev, nameOf) {
+  const who = nameOf(ev.playerIdx);
+  switch (ev.type) {
+    case "drawDeck":
+      return `${who} drew from the deck`;
+    case "drawDiscard":
+      return `${who} took ${cardLabel(ev.card)} from the discard pile`;
+    case "play": {
+      const kind = ev.setType === "run" ? `run${ev.suit ? " " + (SUIT_GLYPH[ev.suit] || ev.suit) : ""}` : `set of ${ev.rank}s`;
+      return `${who} laid down a ${kind}: ${meldCardLabels(ev.cards)}`;
+    }
+    case "add": {
+      const target = ev.ownerIndex != null && ev.ownerIndex !== ev.playerIdx
+        ? ` to ${nameOf(ev.ownerIndex)}'s meld`
+        : "";
+      return `${who} added ${meldCardLabels(ev.cards)}${target}`;
+    }
+    case "swap":
+      return `${who} swapped in ${cardLabel(ev.natural)} for a wildcard`
+        + (ev.represents && (ev.represents.rank || ev.represents.suit) ? ` (was standing in for ${cardLabel(ev.represents)})` : "");
+    case "discard":
+      return `${who} discarded ${cardLabel(ev.card)}${ev.wasWild ? " (a wildcard!)" : ""}`;
+    default:
+      return `${who} ${ev.type}`;
   }
 }
 

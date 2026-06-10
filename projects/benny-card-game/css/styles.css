@@ -1190,6 +1190,13 @@ html.hide-wild .card.is-wild .wild-banner { display: none; }
 .profile-history-table td { font-variant-numeric: tabular-nums; }
 .profile-history-table tr.winner-row td:first-child::before { content: "🏆 "; }
 
+/* Per-row "Download" button in the Recent matches table. */
+.pill.tiny {
+  padding: 3px 10px; font-size: 12px; line-height: 1.2;
+  border-radius: 999px;
+}
+.log-download-btn { white-space: nowrap; }
+
 .achievements-grid {
   display: grid; grid-template-columns: 1fr; gap: 6px;
 }

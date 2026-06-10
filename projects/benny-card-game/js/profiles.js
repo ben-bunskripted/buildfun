@@ -13,6 +13,11 @@ import {
 const KEY = "benny:players:v1";
 const VERSION = 1;
 const HISTORY_CAP = 50;
+// The full move-by-move transcript (downloadable from the Recent matches
+// table) is bulky, so only the most recent matches retain it. The table shows
+// 10; keeping 20 leaves comfortable headroom while bounding localStorage use.
+// Older history rows keep their summary stats but drop the heavy log fields.
+const LOG_DETAIL_CAP = 20;
 
 function safeStorage() {
   try { return globalThis.localStorage || null; } catch (_) { return null; }
@@ -161,9 +166,21 @@ export function recordMatch(profiles, summary, opts = {}) {
       totalPlayers: summary.totalPlayers,
       roundsPlayed: summary.roundHistory.length,
       roundsWon: p.roundsWon,
+      // Downloadable transcript: who this profile was in the match, every
+      // player's name (to label moves), the ordered move log and the per-round
+      // scores. Only public info is in the log (see game.js:logMove).
+      playerIdx: p.idx,
+      players: summary.players.map(pl => pl.name),
+      moveLog: (summary.matchEvents && summary.matchEvents.moveLog) || [],
+      roundHistory: summary.roundHistory,
     });
     if (prof.matchHistory.length > HISTORY_CAP) {
       prof.matchHistory.length = HISTORY_CAP;
+    }
+    // Shed the bulky transcript from older rows so the store stays bounded.
+    for (let i = LOG_DETAIL_CAP; i < prof.matchHistory.length; i++) {
+      const h = prof.matchHistory[i];
+      if (h && h.moveLog) { delete h.moveLog; delete h.players; delete h.roundHistory; }
     }
 
     const earned = earnedPerPlayer[p.idx] || [];
