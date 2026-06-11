@@ -112,8 +112,7 @@ body {
 #welcome-form .field { flex-direction: column; align-items: stretch; gap: 6px; }
 #welcome-form .field > span { font-weight: 600; color: var(--ink-dim); }
 #welcome-form .btn { width: 100%; margin-top: 14px; }
-.cpu-note, .online-note { color: var(--ink-dim); margin: 8px 2px; }
-.online-note { line-height: 1.5; }
+.cpu-note { color: var(--ink-dim); margin: 8px 2px; }
 
 .house-rules { margin: 10px 0; background: var(--bg-3); border-radius: 12px; padding: 6px 12px; }
 .house-rules summary { cursor: pointer; padding: 8px 0; font-weight: 650; color: var(--ink-dim); }

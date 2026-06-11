@@ -13,24 +13,6 @@
 <link rel="apple-touch-icon" href="assets/icon-192-v4.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="css/styles.css" />
-<!-- Netlify Identity widget — provides Google/email sign-in for Online mode.
-     Loaded as a classic script so window.netlifyIdentity exists before the
-     deferred main.js module boots. Self-hosted (not loaded from
-     identity.netlify.com directly) because the CDN doesn't serve
-     Access-Control-Allow-Origin, which combined with `crossorigin=anonymous`
-     would silently block SRI'd loads. Self-hosting also means the SW can
-     pre-cache it so Online sign-in works on a slow first paint.
-
-     To refresh the widget when Netlify ships a new version:
-       curl -fsSL https://identity.netlify.com/v1/netlify-identity-widget.js \
-         -o projects/benny-card-game/assets/netlify-identity-widget.js
-       openssl dgst -sha384 -binary \
-         projects/benny-card-game/assets/netlify-identity-widget.js \
-         | openssl base64 -A
-     Paste the resulting hash into the integrity attribute below, bump the
-     CACHE version in sw.js, and deploy. -->
-<script src="assets/netlify-identity-widget.js"
-        integrity="sha384-dy2tW8xkhLIj8lZR42MCwZhhDb2cCewZiw0uA65CMpdHiJzL+iubx7HzHcCXU2rW"></script>
 </head>
 <body>
 <div id="app">
@@ -89,11 +71,6 @@
             <span class="mode-tile-title">Scoring only</span>
             <span class="mode-tile-desc">Track scores for a real-card game</span>
           </button>
-          <button type="button" class="mode-tile" data-pick-mode="online">
-            <span class="mode-tile-icon" aria-hidden="true">🌐</span>
-            <span class="mode-tile-title">Online</span>
-            <span class="mode-tile-desc">Play live with friends anywhere</span>
-          </button>
         </div>
       </div>
 
@@ -107,7 +84,6 @@
           <button type="button" class="seg-btn active" data-mode="multiplayer">Multiplayer</button>
           <button type="button" class="seg-btn" data-mode="cpu">Solo</button>
           <button type="button" class="seg-btn" data-mode="scoring">Scoring only</button>
-          <button type="button" class="seg-btn" data-mode="online">Online</button>
         </div>
       </label>
 
@@ -174,87 +150,6 @@
         </label>
       </div>
 
-      <!-- Online config -->
-      <div class="mode-block hidden" id="mode-online">
-        <p class="muted small-help">Play a live game over the internet. Sign in, then create a table or join a friend with their code.</p>
-
-        <div id="online-signed-out">
-          <button type="button" id="online-signin-btn" class="pill primary">Sign in to play online</button>
-          <p id="online-unavailable" class="muted small-help hidden">Online play isn't available right now — check your connection.</p>
-        </div>
-
-        <div id="online-signed-in" class="hidden">
-          <p class="muted small-help online-whoami">Signed in as <strong id="online-user-name"></strong> · <button type="button" id="online-signout-btn" class="text-link">Sign out</button></p>
-
-          <label class="field">
-            <span class="field-label">Display name</span>
-            <input type="text" class="name-input" id="online-display-name" maxlength="20" autocomplete="off" placeholder="Your name" />
-          </label>
-
-          <!-- Resume tables: populated by my-rooms; only shown when the user
-               has at least one active table (lobby or in-progress). -->
-          <div class="online-section hidden" id="online-resume-section">
-            <div class="online-browse-head">
-              <span class="field-label">Your tables</span>
-            </div>
-            <div id="online-resume-list" class="online-room-list"></div>
-          </div>
-
-          <div class="online-section">
-            <label class="field">
-              <span class="field-label">Table name</span>
-              <input type="text" class="name-input" id="online-room-name" maxlength="40" autocomplete="off" placeholder="My game" />
-            </label>
-            <label class="field">
-              <span class="field-label">Visibility</span>
-              <div class="seg" id="online-visibility">
-                <button type="button" class="seg-btn active" data-vis="public">Public</button>
-                <button type="button" class="seg-btn" data-vis="private">Private</button>
-              </div>
-            </label>
-            <label class="field hidden" id="online-password-field">
-              <span class="field-label">Password</span>
-              <input type="text" class="name-input" id="online-room-password" maxlength="40" autocomplete="off" placeholder="Set a password" />
-            </label>
-            <label class="field">
-              <span class="field-label">Players</span>
-              <div class="seg" id="online-max-players">
-                <button type="button" class="seg-btn" data-max="2">2</button>
-                <button type="button" class="seg-btn" data-max="3">3</button>
-                <button type="button" class="seg-btn active" data-max="4">4</button>
-              </div>
-            </label>
-            <label class="field">
-              <span class="field-label">Hide wild label</span>
-              <div class="seg" id="online-hide-wild">
-                <button type="button" class="seg-btn active" data-hidewild="off">Off</button>
-                <button type="button" class="seg-btn" data-hidewild="on">On</button>
-              </div>
-            </label>
-            <button type="button" id="online-create-btn" class="pill primary big">Create table</button>
-          </div>
-
-          <div class="online-section">
-            <label class="field">
-              <span class="field-label">Join by code</span>
-              <div class="online-join-row">
-                <input type="text" class="name-input" id="online-join-code" maxlength="5" autocomplete="off" placeholder="CODE" />
-                <button type="button" id="online-join-btn" class="pill">Join</button>
-              </div>
-            </label>
-            <input type="text" class="name-input hidden" id="online-join-password" maxlength="40" autocomplete="off" placeholder="Password (for private tables)" />
-          </div>
-
-          <div class="online-section">
-            <div class="online-browse-head">
-              <span class="field-label">Public tables</span>
-              <button type="button" id="online-refresh-btn" class="text-link">Refresh</button>
-            </div>
-            <div id="online-room-list" class="online-room-list"></div>
-          </div>
-        </div>
-      </div>
-
       <label class="field" id="field-card-style">
         <span class="field-label">Card style</span>
         <div class="seg" id="card-style-seg">
@@ -305,26 +200,6 @@
         <button type="button" id="install-btn" class="text-link hidden">Install Benny</button>
         <span id="app-version" class="start-footer-version" title="Running version"></span>
       </div>
-    </div>
-  </section>
-
-  <!-- Online lobby screen -->
-  <section id="screen-online-lobby" class="screen">
-    <div class="card-panel start-panel">
-      <h1 class="title">Game lobby</h1>
-      <p class="muted">Table <strong id="lobby-room-name"></strong></p>
-      <div class="lobby-code-box">
-        <span class="field-label">Share this code</span>
-        <div class="lobby-code" id="lobby-room-code"></div>
-        <button type="button" class="pill primary" id="lobby-share-btn">Share table</button>
-      </div>
-      <div class="lobby-players">
-        <span class="field-label">Players</span>
-        <div id="lobby-player-list" class="lobby-player-list"></div>
-      </div>
-      <p class="muted small-help" id="lobby-status">Waiting for the host to start…</p>
-      <button type="button" id="lobby-start-btn" class="pill primary big hidden">Start game</button>
-      <button type="button" id="lobby-leave-btn" class="pill ghost">Leave table</button>
     </div>
   </section>
 
@@ -380,8 +255,6 @@
           <button type="button" class="menu-item" role="menuitem" data-action="download-log">Download match log</button>
           <button type="button" class="menu-item" role="menuitem" data-action="rules">How to play</button>
           <button type="button" class="menu-item" role="menuitem" data-action="feedback">Send feedback</button>
-          <button type="button" class="menu-item online-only hidden danger-item" role="menuitem" data-action="archive-online" id="play-menu-archive-btn">Archive &amp; leave</button>
-          <button type="button" class="menu-item online-only hidden danger-item" role="menuitem" data-action="end-online" id="play-menu-end-btn">End game</button>
         </div>
       </div>
     </header>
@@ -510,7 +383,6 @@
             <button type="button" class="seg-btn" data-mode="multiplayer">Multiplayer</button>
             <button type="button" class="seg-btn" data-mode="cpu">Solo</button>
             <button type="button" class="seg-btn" data-mode="scoring">Scoring</button>
-            <button type="button" class="seg-btn" data-mode="online">Online</button>
           </div>
         </label>
         <div id="profile-empty" class="profile-empty hidden">

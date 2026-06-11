@@ -4,7 +4,7 @@ test("loads the start screen", async ({ page }) => {
   await page.goto("/index.html");
   await expect(page).toHaveTitle("Benny");
   await expect(page.locator("#screen-start")).toBeVisible();
-  await expect(page.locator(".mode-tile")).toHaveCount(4);
+  await expect(page.locator(".mode-tile")).toHaveCount(3);
 });
 
 test("picking Solo reveals the config step", async ({ page }) => {

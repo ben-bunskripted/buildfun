@@ -20,7 +20,7 @@ export const STATE_VERSION = 1;
 //   — opts.hideWildLabel: per-match cosmetic — hide the WILD banner/tint so
 //     wildcards look like ordinary cards. Chosen before the match starts and
 //     fixed for its duration; stored on state.options so it serializes with
-//     the save and (online) reaches every seat via the redacted state.
+//     the save.
 export function createMatch(playerNames, dealerIndex, opts = {}) {
   const mode = opts.mode || "multiplayer";
   const kinds = opts.playerKinds || playerNames.map(() => "human");
@@ -65,8 +65,7 @@ export function createMatch(playerNames, dealerIndex, opts = {}) {
     // `moveLog`: a single ordered transcript of every move made in the match —
     //   draws, plays, adds, swaps, discards and round boundaries — used to
     //   produce the downloadable per-match log. Records only public info: a
-    //   deck draw notes that a draw happened but never the card's identity
-    //   (it's hidden from spectators in online play and never persisted here).
+    //   deck draw notes that a draw happened but never the card's identity.
     matchEvents: { opens: [], discards: [], rounds: [], setsPlayed: [], pickups: [], moveLog: [] },
   };
 }
@@ -140,8 +139,7 @@ export function drawFromDeck(state) {
   p.drawsThisRound = (p.drawsThisRound || 0) + 1;
   state.lastDrawnCardId = card.id;
   state.phase = "canAct";
-  // Log the draw but NOT the card — its identity is hidden info (the move log
-  // is sent to every seat in online play and must not leak the deck).
+  // Log the draw but NOT the card — its identity is hidden info.
   logMove(state, { type: "drawDeck", playerIdx: state.currentPlayerIndex });
   return { ok: true, card };
 }
@@ -242,7 +240,7 @@ function ensureMatchEvents(state) {
 // counter so the download reads as a numbered list. `round`/`wildcardRank` are
 // stamped from current state so each line is self-describing. Callers pass only
 // the move-specific fields (type, playerIdx, card details). NEVER pass the
-// identity of a card drawn from the deck — it's hidden info (see redaction).
+// identity of a card drawn from the deck — it's hidden info.
 function logMove(state, entry) {
   ensureMatchEvents(state);
   state.matchEvents.moveLog.push({

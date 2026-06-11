@@ -21,9 +21,6 @@ No install, no bundler. Modern-browser features are used unconditionally
 - **Solo vs CPU** — 2–4 players, you against Easy / Normal / Hard bots.
 - **Pass & Play** — hot-seat on one device, with a tap-to-continue handoff
   screen between players so hands stay hidden.
-- **Online** — planned (phase 2); the engine is already written as a pure
-  `applyAction(state, action)` reducer so it can run server-authoritative on the
-  shared Netlify Functions + Neon backend, reusing Benny's accounts.
 
 ## Rules implemented
 

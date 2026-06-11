@@ -1,5 +1,5 @@
 // Bump this on any deploy that changes shell files.
-const CACHE = "benny-v93";
+const CACHE = "benny-v94";
 
 const CARD_NAMES = [
   "1B","1J","2B","2J","2C","2D","2H","2S","3C","3D","3H","3S",
@@ -26,10 +26,7 @@ const SHELL = [
   "./js/profiles.js",
   "./js/achievements.js",
   "./js/tutorial.js",
-  "./js/net.js",
-  "./js/online.js",
   "./js/sw-register.js",
-  "./assets/netlify-identity-widget.js",
   "./assets/favicon.png",
   "./assets/logo-bg.png",
   "./assets/icon-192-v4.png",
@@ -68,13 +65,6 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return; // Let POSTs (e.g. Netlify feedback) pass through.
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // Online-multiplayer API calls and Netlify Identity (gotrue) requests must
-  // always hit the network — never serve a cached (stale) poll response or a
-  // stale /user|/settings auth response (which would also ignore the request's
-  // Authorization header and could leak a previous user's data across logins).
-  if (url.pathname.startsWith("/.netlify/functions/") ||
-      url.pathname.startsWith("/.netlify/identity/") ||
-      url.pathname.startsWith("/api/")) return;
 
   event.respondWith((async () => {
     const cached = await caches.match(req);

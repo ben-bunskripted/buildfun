@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Drives the buildless static client through a real browser. The dev server is
 // just Python's http.server rooted at the game directory (the same command the
-// project README uses), so hot-seat modes work without the Netlify backend.
+// project README uses).
 const PORT = 8123;
 
 export default defineConfig({

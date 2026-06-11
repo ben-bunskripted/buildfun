@@ -1,5 +1,5 @@
 // Sh!thead — pure rules. No state mutation, no DOM. Shared by the client engine
-// (game.js / ai.js) and the online backend (server re-imports this module).
+// (game.js / ai.js).
 //
 // Ranking ladder (low → high): 3 4 5 6 7 8 9 10 J Q K A, with 2 woven in low.
 // Power cards (each toggleable in setup):
