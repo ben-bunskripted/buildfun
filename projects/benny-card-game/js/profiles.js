@@ -126,21 +126,15 @@ export function buildMatchSummary(state) {
 //                        before/after values and which items are new.
 // All three are keyed by playerIdx, so the match-end screen can render the
 // "Rewards earned" section + a section for progress nudges.
-export function recordMatch(profiles, summary, opts = {}) {
-  // opts.onlyPlayerIdx — only fold this one player's data into profiles. Used
-  // by online matches so each device records its own user and not the
-  // opponents (whose stats live on their own devices). When omitted, every
-  // human player in the summary is recorded as before.
+export function recordMatch(profiles, summary) {
   const newUnlocks = {};
   const progressUnlocks = {};
   const progressGains = {};
   const earnedPerPlayer = evaluateMatch(summary, profiles);
   const setsPerPlayer = summariseSetsPerPlayer(summary);
-  const onlyIdx = (typeof opts.onlyPlayerIdx === "number") ? opts.onlyPlayerIdx : null;
 
   for (const p of summary.players) {
     if (p.kind === "cpu") continue;       // CPUs don't get profiles or achievements
-    if (onlyIdx != null && p.idx !== onlyIdx) continue;
     const prof = ensureProfile(profiles, p.name);
     if (!prof) continue;
     if (!prof.progress) prof.progress = {};   // backfill for older saved profiles

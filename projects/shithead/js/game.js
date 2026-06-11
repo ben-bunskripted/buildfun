@@ -1,9 +1,8 @@
 // Sh!thead — match state machine.
 //
 // `applyAction(state, action)` mutates and returns the state; it is the single
-// entry point used by the UI (main.js), the CPU (ai.js), and (later) the online
-// backend, which deep-clones the canonical state before applying so the engine
-// stays the one source of truth for both client and server.
+// entry point used by the UI (main.js) and the CPU (ai.js), keeping the engine
+// the one source of truth for game logic.
 //
 // Card sources, in the order a player exhausts them:
 //   hand → face-up (only once hand is empty) → face-down (blind, last resort).

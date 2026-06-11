@@ -13,18 +13,14 @@
 // keyFor duplicated from profiles.js to avoid a circular import.
 const profileKey = (name) => String(name || "").trim().toLowerCase();
 
-// Online matches use the same engine + matchEvents as multiplayer/cpu, so
-// they get the same per-mode achievement & progress tracking as the local
-// modes — just bucketed separately so a player's online record is its own
-// thing in the profile screen.
-export const ALL_MODES = ["multiplayer", "cpu", "scoring", "online"];
-export const PLAY_MODES = ["multiplayer", "cpu", "online"];
+// Achievement & progress tracking is bucketed per mode in the profile screen.
+export const ALL_MODES = ["multiplayer", "cpu", "scoring"];
+export const PLAY_MODES = ["multiplayer", "cpu"];
 
 export const MODE_LABELS = {
   multiplayer: "Multiplayer",
   cpu: "Solo",
   scoring: "Scoring",
-  online: "Online",
 };
 
 export const SUIT_NAMES = { S: "Spades", H: "Hearts", D: "Diamonds", C: "Clubs" };

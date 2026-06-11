@@ -178,8 +178,6 @@ function wireStart() {
     $$(".mode-tile").forEach((x) => x.classList.remove("active"));
     t.classList.add("active");
     mode = t.dataset.mode;
-    $("#setup-offline").hidden = mode === "online";
-    $("#setup-online").hidden = mode !== "online";
     $("#field-difficulty").hidden = mode !== "cpu";
     renderNames();
   }));
@@ -284,7 +282,6 @@ function collectSetup() {
 }
 
 function onDeal() {
-  if (mode === "online") return;
   if (storage.hasSnapshot(mode)) {
     showConfirm("Start a new game?", "This will overwrite your saved game.", startNewGame);
   } else {
@@ -1257,9 +1254,7 @@ function renderSaved() {
 function resumeMode(m) {
   mode = m;
   $$(".mode-tile").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
-  const off = $("#setup-offline"), on = $("#setup-online"), diff = $("#field-difficulty");
-  if (off) off.hidden = mode === "online";
-  if (on) on.hidden = mode !== "online";
+  const diff = $("#field-difficulty");
   if (diff) diff.hidden = mode !== "cpu";
   onResume();
 }

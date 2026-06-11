@@ -18,8 +18,6 @@ import {
 } from "./scoring.js";
 import { save as storageSave, load as storageLoad, clear as storageClear, loadPrefs, savePrefs, hasSnapshot, MATCH_MODES } from "./storage.js";
 import * as tutorial from "./tutorial.js";
-import * as online from "./online.js";
-import * as net from "./net.js";
 import { loadProfiles, saveProfiles, buildMatchSummary, recordMatch, listKnownPlayers, achievementById, keyFor as profileKeyFor } from "./profiles.js";
 import {
   ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS, ALL_MODES, MODE_LABELS,
@@ -32,10 +30,8 @@ let ui = {
   mode: "multiplayer",   // "multiplayer" | "cpu" | "scoring"
   selectedIds: new Set(),
   // The user's preferred hand order, as a list of card IDs. Driven by drag-
-  // reorder and the Sort button. Re-applied to the hand on every render so
-  // that adopting server state in online mode (which overwrites the actor's
-  // hand each turn) doesn't reset their layout. Unknown IDs (e.g., a card
-  // just drawn) fall through to the end.
+  // reorder and the Sort button. Re-applied to the hand on every render.
+  // Unknown IDs (e.g., a card just drawn) fall through to the end.
   handOrder: [],
   // Multiplayer setup
   numPlayers: 3,
@@ -112,8 +108,7 @@ function setCardSize(size) {
 // "Hide wild label" — when on, wildcards (Bennys) render as ordinary cards
 // (no gold tint, no WILD banner). It's a per-match choice fixed at setup, so
 // rendering reads it straight off the active match's state.options — for every
-// mode (solo / multiplayer set it from the start screen; online from the host's
-// create-room choice, delivered to every seat via the redacted state). There's
+// mode (solo / multiplayer set it from the start screen). There's
 // no match in progress on the start screen, so it falls back to off there.
 // Implemented as a root <html> class so the whole board reflects it with a
 // single class toggle.
@@ -155,9 +150,6 @@ function applyHideWildLabel() {
 // ---------- Persistence ----------
 function persist() {
   if (!state) return;
-  // Online matches live server-side — never write them to a local slot (a
-  // stale snapshot would desync on resume; the room is the source of truth).
-  if (online.isActive()) return;
   // The tutorial match is ephemeral — never write it to localStorage so a
   // reload doesn't leave the user a half-finished tutorial as a resumable
   // game on the start screen.
@@ -419,30 +411,25 @@ async function onFeedbackSubmit(e) {
 }
 
 function showModeBlock() {
-  for (const m of ["multiplayer", "cpu", "scoring", "online"]) {
+  for (const m of ["multiplayer", "cpu", "scoring"]) {
     const block = $(`mode-${m}`);
     if (block) block.classList.toggle("hidden", ui.mode !== m);
   }
-  if (ui.mode === "online") refreshOnlineModeBlock();
   // Per-mode settings visibility:
   //  - Animate CPU moves only makes sense with a CPU opponent (Solo).
   //  - Scoring mode renders no cards, so card style/size are irrelevant.
   const setShown = (id, shown) => $(id) && $(id).classList.toggle("hidden", !shown);
   setShown("field-animate-cpu", ui.mode === "cpu");
-  // Hide wild label is a local-setup option (solo / multiplayer). Online sets
-  // it in its own create form; scoring renders no cards.
+  // Hide wild label is a local-setup option (solo / multiplayer); scoring
+  // renders no cards.
   setShown("field-hide-wild", ui.mode === "cpu" || ui.mode === "multiplayer");
   applyCardFieldVisibility();
-  // Online has its own create/join buttons in the block — the generic
-  // "Start match" button and tutorial link don't apply.
-  setShown("start-btn", ui.mode !== "online");
+  setShown("start-btn", true);
 }
 
-// Card style/size only apply to modes that render cards, and in Online mode we
-// hide them until the player has signed in (the block is sign-in-first).
+// Card style/size only apply to modes that render cards.
 function applyCardFieldVisibility() {
-  const lockedOut = ui.mode === "online" && !net.currentUser();
-  const show = ui.mode !== "scoring" && !lockedOut;
+  const show = ui.mode !== "scoring";
   const setShown = (id, s) => $(id) && $(id).classList.toggle("hidden", !s);
   setShown("field-card-style", show);
   setShown("field-card-size", show);
@@ -451,7 +438,7 @@ function applyCardFieldVisibility() {
 // Switch the selected mode, sync the segmented control + dependent UI, and
 // refresh the resume banner so it reflects the newly-selected mode's save.
 function selectMode(mode) {
-  if (mode !== "online" && !MATCH_MODES.includes(mode)) return;
+  if (!MATCH_MODES.includes(mode)) return;
   ui.mode = mode;
   const seg = $("mode-seg");
   if (seg) seg.querySelectorAll(".seg-btn").forEach(b => {
@@ -626,7 +613,7 @@ function onStartMatch() {
   start();
 }
 
-const MODE_TITLES = { multiplayer: "Multiplayer", cpu: "Solo", scoring: "Scoring", online: "Online" };
+const MODE_TITLES = { multiplayer: "Multiplayer", cpu: "Solo", scoring: "Scoring" };
 
 // Simple modal-confirm wrapper. Pulls in the static markup defined in index.html.
 function showConfirm({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", onConfirm }) {
@@ -799,9 +786,6 @@ function runReveal(names, finalIndex, onDone) {
 // Called at the start of a turn (after deal, after a discard, after a CPU recap).
 // Sends humans to the pass screen and CPUs to the invisible runner.
 function routeTurnStart() {
-  // Online play has its own router: it maps the active seat to this device,
-  // drives the spectator lock, and never shows the hot-seat pass screen.
-  if (online.isActive()) { online.route(); return; }
   if (state.phase === "roundOver") { goRoundEnd(); return; }
   const p = currentPlayer(state);
   if (p.kind === "cpu") { runCpuTurn(); return; }
@@ -1038,53 +1022,8 @@ function renderPublicState() {
 
 // Apply one CPU action, then animate the visual delta. Returns the action
 // result so the caller can detect roundWon / failures.
-// Replace one hidden placeholder in player[idx].hand with the given real card.
-// No-ops if the card is already present by id, or if the hand has no hidden
-// slots to claim (e.g., local CPU mode where the hand is always real).
-function patchHiddenCardIntoHand(playerIdx, card) {
-  if (!card || !state || !Array.isArray(state.players)) return;
-  const p = state.players[playerIdx];
-  if (!p || !Array.isArray(p.hand)) return;
-  if (p.hand.some(h => h && h.id === card.id)) return;
-  const hiddenIdx = p.hand.findIndex(h => h && h.hidden);
-  if (hiddenIdx < 0) return;
-  p.hand[hiddenIdx] = card;
-}
-
-function patchActorHandFromAction(action, actorIdx) {
-  if (!action || typeof action !== "object") return;
-  switch (action.type) {
-    case "discard":
-      if (action.card) patchHiddenCardIntoHand(actorIdx, action.card);
-      break;
-    case "swap":
-      if (action.natural) patchHiddenCardIntoHand(actorIdx, action.natural);
-      break;
-    case "play": {
-      const cards = action.arrangement && action.arrangement.cards;
-      if (Array.isArray(cards)) for (const c of cards) if (c && c.card) patchHiddenCardIntoHand(actorIdx, c.card);
-      break;
-    }
-    case "add": {
-      const added = action.arrangement && action.arrangement.added;
-      if (Array.isArray(added)) for (const c of added) if (c && c.card) patchHiddenCardIntoHand(actorIdx, c.card);
-      break;
-    }
-    default:
-      break;
-  }
-}
-
 async function stepCpuAnimated(action) {
   const playerIdx = state.currentPlayerIndex;
-  // For online spectators the actor's hand is server-redacted to opaque
-  // placeholders. The server includes the real card identities in any action
-  // that moves a card out of the hand — splice them back in (replacing one
-  // hidden placeholder each) so the engine can find them by id and so the
-  // animation has a real card to fly. CPU-mode hands are already real; this
-  // no-ops because the cards are already present by id.
-  patchActorHandFromAction(action, playerIdx);
-
   // Capture pre-mutation rects — some sources disappear after the engine runs.
   const drawPileR = rectOf(document.getElementById("draw-pile"));
   const discardR = rectOf(document.querySelector("#discard-host > *") || document.getElementById("discard-pile"));
@@ -1191,8 +1130,8 @@ async function stepCpuAnimated(action) {
 
 // ---------- Play screen rendering ----------
 function renderAll() {
-  // Online matches carry the host's choice on state.options; refresh the root
-  // class each render so a spectator adopting fresh server state reflects it.
+  // The match carries the "hide wild label" choice on state.options; refresh
+  // the root class each render so it stays in sync with the active match.
   applyHideWildLabel();
   renderTopBar();
   renderAllMelds();
@@ -1232,12 +1171,6 @@ function renderTopBar() {
 function renderAllMelds() {
   const wrap = $("all-melds");
   wrap.innerHTML = "";
-  // Online roster keyed by seat index — used to render per-opponent presence
-  // (dot + "away" label) on each row. Player index in state equals seat_index
-  // (see start-game.mjs), so this lookup is a direct index.
-  const rosterBySeat = online.isActive()
-    ? Object.fromEntries((online.players() || []).map(rp => [rp.seat, rp]))
-    : null;
   for (let i = 0; i < state.players.length; i++) {
     const p = state.players[i];
     const row = document.createElement("div");
@@ -1250,18 +1183,10 @@ function renderAllMelds() {
     // In solo mode the "(you)" tag follows the human's row (always the same
     // row); in multiplayer it follows the active turn (since the pass screen
     // gates who's looking at the device).
-    const isYou = online.isActive()
-      ? i === online.mySeat()
-      : state.mode === "cpu"
-        ? p.kind === "human"
-        : i === state.currentPlayerIndex;
-    // Every online seat (including self) gets a presence indicator. Self is
-    // always green since this very render means they're looking at the page,
-    // but showing the dot keeps the row layout consistent with opponents.
-    const rosterEntry = rosterBySeat ? rosterBySeat[i] : null;
-    if (rosterEntry && !isYou && rosterEntry.online === false) row.classList.add("is-opponent-away");
-    const presence = rosterEntry ? presenceMarkup(rosterEntry, { dotOnly: isYou }) : "";
-    name.innerHTML = `${presence}<span class="player-name-text">${escapeHTML(isYou ? `${p.name} (you)` : p.name)}</span>`;
+    const isYou = state.mode === "cpu"
+      ? p.kind === "human"
+      : i === state.currentPlayerIndex;
+    name.innerHTML = `<span class="player-name-text">${escapeHTML(isYou ? `${p.name} (you)` : p.name)}</span>`;
     if (i === state.dealerIndex) {
       const chip = document.createElement("span");
       chip.className = "dealer-chip";
@@ -1354,8 +1279,6 @@ function renderMiddle() {
 // turn (so the user can keep planning). Multiplayer always shows the active
 // player (the pass screen gates everyone else).
 function handViewerIdx() {
-  // Online: always show MY hand, regardless of whose turn it is.
-  if (online.isActive()) return online.mySeat();
   if (state && state.mode === "cpu") {
     const idx = state.players.findIndex(p => p.kind === "human");
     if (idx >= 0) return idx;
@@ -1366,8 +1289,7 @@ function handViewerIdx() {
 // Reorder the player's hand in place to match `ui.handOrder` — the user's
 // preferred ordering of card IDs. IDs no longer in the hand are dropped; new
 // IDs (e.g., a just-drawn card) are appended. Updates ui.handOrder to the
-// resulting sequence so callers stay in sync. In online mode this is what
-// keeps the actor's drag-arranged hand stable across server state adoptions.
+// resulting sequence so callers stay in sync.
 function applyHandOrderPref(player) {
   if (!player || !Array.isArray(player.hand)) return;
   if (!ui.handOrder || ui.handOrder.length === 0) {
@@ -1556,16 +1478,6 @@ function escapeHTML(s) {
 
 // ---------- User interactions ----------
 function exitToStart() {
-  // Online sessions can't be "saved" locally — leaving the screen leaves the
-  // room (stops polling, frees the seat in the lobby).
-  if (online.isInSession()) {
-    online.leave();
-    state = null;
-    ui.selectedIds.clear();
-    goToStartConfigStep("online");
-    showScreen("screen-start");
-    return;
-  }
   if (state) persist();
   // If the user bails mid-tutorial via Save & exit, tear down the coach so
   // it doesn't linger on the start screen.
@@ -1593,48 +1505,8 @@ const MENU_ACTIONS = {
     syncFanToggleLabel();
     if (typeof layoutHand === "function") layoutHand();
   },
-  "archive-online": confirmArchiveCurrent,
-  "end-online": confirmEndCurrent,
 };
 
-// Non-host (and host pre-game, if they like) — archive their seat. Decrements
-// max_players on the server; if the room drops below 2 seats it's deleted.
-function confirmArchiveCurrent() {
-  if (!online.isInSession()) return;
-  showConfirm({
-    title: "Archive this game?",
-    body: "You'll leave this table for good and it will disappear from your list. The other players keep their seats.",
-    confirmLabel: "Archive",
-    onConfirm: async () => {
-      try { await online.archive(); } catch (_) {}
-      state = null;
-      ui.selectedIds.clear();
-      goToStartConfigStep("online");
-      showScreen("screen-start");
-      loadResumableRooms();
-      toast("Game archived.");
-    },
-  });
-}
-
-// Host only — end the game for everyone (hard-deletes the room server-side).
-function confirmEndCurrent() {
-  if (!online.isInSession() || !online.isHost()) return;
-  showConfirm({
-    title: "End this game?",
-    body: "Everyone at the table will be dropped and the game will disappear from their list. This can't be undone.",
-    confirmLabel: "End game",
-    onConfirm: async () => {
-      try { await online.endGame(); } catch (e) { toast((e && e.message) || "Couldn't end the game."); return; }
-      state = null;
-      ui.selectedIds.clear();
-      goToStartConfigStep("online");
-      showScreen("screen-start");
-      loadResumableRooms();
-      toast("Game ended.");
-    },
-  });
-}
 function closeAllTopBarMenus() {
   document.querySelectorAll(".top-bar-menu-list").forEach(list => {
     list.classList.add("hidden");
@@ -1652,7 +1524,6 @@ function wireTopBarMenu(btnId, listId) {
     const wasOpen = !list.classList.contains("hidden");
     closeAllTopBarMenus();
     if (!wasOpen) {
-      syncOnlineMenuVisibility(list);
       list.classList.remove("hidden");
       btn.setAttribute("aria-expanded", "true");
     }
@@ -1666,18 +1537,6 @@ function wireTopBarMenu(btnId, listId) {
   });
 }
 
-// Online destructive action at the bottom of the menu. A participant sees
-// "Archive & leave"; a host sees "End game" — never both, so the action is
-// unambiguous. Both render in the danger colour. Re-evaluated every time the
-// menu opens so role changes reflect immediately.
-function syncOnlineMenuVisibility(list) {
-  const inSession = online.isInSession();
-  const isHost = online.isHost();
-  const archiveBtn = list.querySelector("[data-action='archive-online']");
-  const endBtn = list.querySelector("[data-action='end-online']");
-  if (archiveBtn) archiveBtn.classList.toggle("hidden", !(inSession && !isHost));
-  if (endBtn) endBtn.classList.toggle("hidden", !(inSession && isHost));
-}
 document.addEventListener("click", (e) => {
   // Card size segs (start screen + both hamburger menus) all route through
   // setCardSize so they stay in sync.
@@ -1750,23 +1609,17 @@ function wireUp() {
   );
 
   // Draw pile / discard pile
-  $("draw-pile").addEventListener("click", async () => {
+  $("draw-pile").addEventListener("click", () => {
     if (state.phase !== "mustDraw") return;
-    const r = await online.applyOnlineOrLocal({
-      action: { type: "drawDeck" },
-      localApply: () => drawFromDeck(state),
-    });
+    const r = drawFromDeck(state);
     if (!r.ok) toast(r.reason);
     persist();
     renderAll();
     if (r.ok) tutorial.notify("drawDeck");
   });
-  $("discard-pile").addEventListener("click", async () => {
+  $("discard-pile").addEventListener("click", () => {
     if (state.phase === "mustDraw") {
-      const r = await online.applyOnlineOrLocal({
-        action: { type: "drawDiscard" },
-        localApply: () => drawFromDiscard(state),
-      });
+      const r = drawFromDiscard(state);
       if (!r.ok) toast(r.reason);
       persist();
       renderAll();
@@ -1774,10 +1627,7 @@ function wireUp() {
     }
     if (state.phase === "canAct" && ui.selectedIds.size === 1) {
       const id = [...ui.selectedIds][0];
-      const r = await online.applyOnlineOrLocal({
-        action: { type: "discard", cardId: id },
-        localApply: () => discard(state, id),
-      });
+      const r = discard(state, id);
       if (!r.ok) { toast(r.reason); return; }
       ui.selectedIds.clear();
       afterDiscard(r);
@@ -1814,13 +1664,10 @@ function wireUp() {
 
   // Discard the selected card — same path as tapping the discard pile, but
   // surfaced as a button in the hand actions row for discoverability.
-  $("discard-btn").addEventListener("click", async () => {
+  $("discard-btn").addEventListener("click", () => {
     if (state.phase !== "canAct" || ui.selectedIds.size !== 1) return;
     const id = [...ui.selectedIds][0];
-    const r = await online.applyOnlineOrLocal({
-      action: { type: "discard", cardId: id },
-      localApply: () => discard(state, id),
-    });
+    const r = discard(state, id);
     if (!r.ok) { toast(r.reason); return; }
     ui.selectedIds.clear();
     afterDiscard(r);
@@ -1828,9 +1675,6 @@ function wireUp() {
 
   // Round end / match end buttons
   $("continue-btn").addEventListener("click", () => {
-    // Online: only the host advances the round / ends the match; everyone else
-    // waits for the synced state to arrive via polling.
-    if (online.isInSession()) { online.advance(); return; }
     // Scoring mode has its own flow.
     if (state && state.mode === "scoring") {
       if (isScoringMatchOver(state)) { goMatchEnd(); return; }
@@ -1848,14 +1692,6 @@ function wireUp() {
     }
   });
   $("new-match-btn").addEventListener("click", () => {
-    if (online.isInSession()) {
-      online.leave();
-      state = null;
-      ui.selectedIds.clear();
-      goToStartConfigStep("online");
-      showScreen("screen-start");
-      return;
-    }
     const finishedMode = state && state.mode;
     discardSave(finishedMode);
     state = null;
@@ -1900,11 +1736,8 @@ function wireUp() {
   });
 }
 
-async function doPlace(arrangement) {
-  const r = await online.applyOnlineOrLocal({
-    action: { type: "play", arrangement },
-    localApply: () => placeNewSet(state, arrangement),
-  });
+function doPlace(arrangement) {
+  const r = placeNewSet(state, arrangement);
   if (!r.ok) { toast(r.reason); return; }
   ui.selectedIds.clear();
   persist();
@@ -2053,14 +1886,11 @@ function resolveDropTarget(clientX, clientY, cardEl) {
   return null;
 }
 
-async function handleDropOnTarget(target, _cardEl) {
+function handleDropOnTarget(target, _cardEl) {
   if (!state) return;
   if (target.kind === "discard") {
     // Must keep at least 1 card to discard; engine will refuse otherwise.
-    const r = await online.applyOnlineOrLocal({
-      action: { type: "discard", cardId: target.data.cardId },
-      localApply: () => discard(state, target.data.cardId),
-    });
+    const r = discard(state, target.data.cardId);
     if (!r.ok) { toast(r.reason); return; }
     ui.selectedIds.clear();
     afterDiscard(r);
@@ -2209,11 +2039,8 @@ function openAddOrSwapModal() {
   modal.classList.remove("hidden");
 }
 
-async function finalizeAddition(set, arrangement) {
-  const r = await online.applyOnlineOrLocal({
-    action: { type: "add", setId: set.id, arrangement },
-    localApply: () => addToSet(state, set.id, arrangement),
-  });
+function finalizeAddition(set, arrangement) {
+  const r = addToSet(state, set.id, arrangement);
   if (!r.ok) { toast(r.reason); return; }
   ui.selectedIds.clear();
   persist();
@@ -2221,11 +2048,8 @@ async function finalizeAddition(set, arrangement) {
   tutorial.notify("add");
 }
 
-async function finalizeSwap(set, positionIndex, naturalCardId) {
-  const r = await online.applyOnlineOrLocal({
-    action: { type: "swap", setId: set.id, positionIndex, naturalCardId },
-    localApply: () => swapWildcard(state, set.id, positionIndex, naturalCardId),
-  });
+function finalizeSwap(set, positionIndex, naturalCardId) {
+  const r = swapWildcard(state, set.id, positionIndex, naturalCardId);
   if (!r.ok) { toast(r.reason); return; }
   ui.selectedIds.clear();
   persist();
@@ -2235,17 +2059,6 @@ async function finalizeSwap(set, positionIndex, naturalCardId) {
 
 function afterDiscard(result) {
   persist();
-  // In online mode the server is authoritative for round-over and no-way-out
-  // detection — `state.phase === "roundOver"` is already set by the engine
-  // (round-win) or by the server's post-discard finalizeNoWayOut. The
-  // applyActionRemote flow already adopted the new state and called route(),
-  // so the screen has transitioned correctly. We just notify the tutorial
-  // and flag a no-way-out for the round-end banner.
-  if (online.isActive()) {
-    tutorial.notify("discard", { wonRound: state.phase === "roundOver" && state.roundWinner != null });
-    if (result.noWayOut) state.noWayOutTriggered = true;
-    return;
-  }
   tutorial.notify("discard", { wonRound: !!result.wonRound });
   if (result.wonRound) {
     goRoundEnd();
@@ -2404,13 +2217,10 @@ function goMatchEnd() {
     tbody.appendChild(tr);
   }
   renderMatchEndHistory();
-  // Record this match into the local profile store and render rewards. For
-  // online play, recordAndRenderRewards folds in only the local user's seat
-  // (via onlyPlayerIdx) so opponents — whose stats live on their own devices —
-  // aren't double-counted here.
+  // Record this match into the local profile store and render rewards.
   recordAndRenderRewards();
   buildConfetti();
-  if (!online.isInSession()) discardSave();
+  discardSave();
 }
 
 // Fold the just-finished match into the player profiles store and render the
@@ -2423,15 +2233,7 @@ function recordAndRenderRewards() {
   if (!state) return;
   const profiles = loadProfiles();
   const summary = buildMatchSummary(state);
-  // Online matches: only fold the local user's stats into this device's
-  // profile store. Opponents are remote players whose stats live on their own
-  // devices — recording them here would double-count when each device runs
-  // this same code path. Tag the unlock with the local seat so the rewards
-  // block below shows only the local player's earnings.
-  const isOnline = online.isInSession();
-  const localSeat = isOnline ? online.mySeat() : null;
-  const recordOpts = isOnline && localSeat >= 0 ? { onlyPlayerIdx: localSeat } : {};
-  const { newUnlocks, progressUnlocks, progressGains } = recordMatch(profiles, summary, recordOpts);
+  const { newUnlocks, progressUnlocks, progressGains } = recordMatch(profiles, summary);
   saveProfiles(profiles);
 
   // Union of every player who has anything new to celebrate.
@@ -3065,566 +2867,6 @@ function applyUserName(name) {
   if (typeof renderScoringDealer === "function") renderScoringDealer();
 }
 
-// Land on whichever mode has the most recently saved game, so returning
-// players see their last match's resume prompt regardless of mode.
-// ---------- Online multiplayer ----------
-let onlineVisibility = "public";
-let onlineMaxPlayers = 4;
-// Host's "hide wild label" choice for a new table, set in the create form.
-// Applies to every seat once the match deals (carried on state.options).
-let onlineHideWildLabel = false;
-
-// Hand main.js's state + renderers to the online controller. online.js never
-// imports these directly because `state` and the DOM helpers are module-private.
-function initOnline() {
-  online.init({
-    getState: () => state,
-    setState: (s) => { state = s; },
-    persist,
-    stepRemoteAction: stepCpuAnimated,
-    renderAll,
-    showScreen,
-    toast,
-    goRoundEnd,
-    goMatchEnd,
-    clearSelection: () => ui.selectedIds.clear(),
-    beginSpectatorLock: () => document.body.classList.add("cpu-animating"),
-    endSpectatorLock: () => document.body.classList.remove("cpu-animating"),
-    onRoster: handleOnlineRoster,
-    onRoomGone: handleOnlineRoomGone,
-  });
-
-  net.initIdentity().then(() => { refreshOnlineModeBlock(); tryPendingJoin(); });
-  net.onAuth((user) => {
-    if (user) { net.syncAuth(onlineDisplayName()).catch(() => {}); }
-    refreshOnlineModeBlock();
-    tryPendingJoin();
-  });
-}
-
-function onlineDisplayName() {
-  const field = $("online-display-name");
-  const typed = field && field.value.trim();
-  if (typed) return typed;
-  const u = net.currentUser();
-  return (u && u.name) || (loadPrefs().userName || "").trim() || "Player";
-}
-
-function buildOnlineUI() {
-  const signInBtn = $("online-signin-btn");
-  if (!signInBtn) return; // markup not present
-  signInBtn.addEventListener("click", () => net.signIn());
-  $("online-signout-btn").addEventListener("click", () => net.signOut());
-
-  const visSeg = $("online-visibility");
-  visSeg.addEventListener("click", (e) => {
-    const btn = e.target.closest(".seg-btn");
-    if (!btn) return;
-    visSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    onlineVisibility = btn.dataset.vis;
-    $("online-password-field").classList.toggle("hidden", onlineVisibility !== "private");
-  });
-
-  const maxSeg = $("online-max-players");
-  if (maxSeg) {
-    maxSeg.addEventListener("click", (e) => {
-      const btn = e.target.closest(".seg-btn");
-      if (!btn) return;
-      maxSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      const n = Number(btn.dataset.max);
-      onlineMaxPlayers = (n >= 2 && n <= 4) ? n : 4;
-    });
-  }
-
-  const hideWildSeg = $("online-hide-wild");
-  if (hideWildSeg) {
-    hideWildSeg.addEventListener("click", (e) => {
-      const btn = e.target.closest(".seg-btn");
-      if (!btn) return;
-      hideWildSeg.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      onlineHideWildLabel = btn.dataset.hidewild === "on";
-    });
-  }
-
-  $("online-create-btn").addEventListener("click", onlineCreate);
-  $("online-join-btn").addEventListener("click", onlineJoin);
-  $("online-join-code").addEventListener("input", () => {
-    // Show the password field once a code is typed (private tables need it).
-    $("online-join-password").classList.toggle("hidden", $("online-join-code").value.trim().length === 0);
-  });
-  $("online-refresh-btn").addEventListener("click", () => loadOnlineRoomList());
-
-  $("lobby-start-btn").addEventListener("click", () => online.startGame());
-  $("lobby-leave-btn").addEventListener("click", () => {
-    online.leave();
-    state = null;
-    ui.selectedIds.clear();
-    goToStartConfigStep("online");
-    showScreen("screen-start");
-  });
-  const shareBtn = $("lobby-share-btn");
-  if (shareBtn) shareBtn.addEventListener("click", shareLobbyCode);
-}
-
-// Build a sharable join link + message for the current lobby. Web Share API on
-// mobile (and modern desktop), clipboard fallback elsewhere — either way the
-// recipient can tap the URL and land on the Online tab with the code pre-filled.
-async function shareLobbyCode() {
-  const code = ($("lobby-room-code") || {}).textContent || "";
-  if (!code) { toast("No table code to share yet."); return; }
-  const url = new URL(window.location.href);
-  url.searchParams.set("join", code);
-  // Strip the hash/screen-state so the link doesn't carry stale UI state.
-  url.hash = "";
-  const shareUrl = url.toString();
-  const message = `Join my Benny game! Code ${code}: ${shareUrl}`;
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: "Benny", text: `Join my Benny game! Code: ${code}`, url: shareUrl });
-      return;
-    }
-  } catch (e) {
-    // User dismissed the share sheet — fall through to clipboard copy.
-    if (e && e.name === "AbortError") return;
-  }
-  try {
-    await navigator.clipboard.writeText(message);
-    toast("Link copied — paste it to your friends.");
-  } catch (_) {
-    // Last-resort fallback: a prompt() so the user can copy manually.
-    window.prompt("Copy this link:", message);
-  }
-}
-
-// Reflect Identity auth state in the online mode block and refresh the table list.
-function refreshOnlineModeBlock() {
-  const signedOut = $("online-signed-out");
-  const signedIn = $("online-signed-in");
-  if (!signedOut || !signedIn) return;
-  if (!net.isIdentityAvailable()) {
-    signedOut.classList.remove("hidden");
-    signedIn.classList.add("hidden");
-    $("online-signin-btn").classList.add("hidden");
-    $("online-unavailable").classList.remove("hidden");
-    return;
-  }
-  const user = net.currentUser();
-  signedOut.classList.toggle("hidden", !!user);
-  signedIn.classList.toggle("hidden", !user);
-  applyCardFieldVisibility();
-  if (user) {
-    $("online-user-name").textContent = user.name || user.email || "Player";
-    const dn = $("online-display-name");
-    if (dn && !dn.value) dn.value = user.name || (loadPrefs().userName || "").trim() || "";
-    if (!$("online-room-name").value) $("online-room-name").value = `${onlineDisplayName()}'s game`;
-    loadOnlineRoomList();
-    loadResumableRooms();
-  }
-}
-
-// Populate the "Your tables" section from /my-rooms. Hidden when the user has
-// no active tables. Clicking Rejoin runs the normal joinRoom path — the server
-// is idempotent for an already-seated user, so this puts them back where they
-// left off (lobby or live game).
-//
-// Each row is swipeable: dragging left reveals an Archive / End button on the
-// trailing edge. Hosts get "End" (deletes the room for everyone); non-hosts
-// (and pre-game hosts who just want to walk away) get "Archive" (drops just
-// their seat). Both actions go through showConfirm before hitting the server.
-async function loadResumableRooms() {
-  const section = $("online-resume-section");
-  const host = $("online-resume-list");
-  if (!section || !host) return;
-  try {
-    const res = await net.listMyRooms();
-    const rooms = (res && res.rooms) || [];
-    if (!rooms.length) { section.classList.add("hidden"); return; }
-    section.classList.remove("hidden");
-    host.innerHTML = "";
-    for (const r of rooms) {
-      host.appendChild(buildResumableRow(r));
-    }
-  } catch (_) {
-    // Silent failure — the user can still join via code if they remember it.
-    section.classList.add("hidden");
-  }
-}
-
-function buildResumableRow(r) {
-  const wrap = document.createElement("div");
-  wrap.className = "online-room-row-wrap";
-
-  // Trailing action panel — revealed by the swipe. Host sees "End" (closes
-  // the table for everyone); participants see "Archive" (drops just their
-  // seat). Showing only one keeps the swipe target unambiguous.
-  const actions = document.createElement("div");
-  actions.className = "online-room-actions";
-  const actionBtn = document.createElement("button");
-  if (r.isHost) {
-    actionBtn.className = "row-action end";
-    actionBtn.textContent = "End";
-    actionBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmEndRow(r, wrap); });
-  } else {
-    actionBtn.className = "row-action archive";
-    actionBtn.textContent = "Archive";
-    actionBtn.addEventListener("click", (e) => { e.stopPropagation(); confirmArchiveRow(r, wrap); });
-  }
-  actions.appendChild(actionBtn);
-  wrap.appendChild(actions);
-
-  const row = document.createElement("div");
-  row.className = "online-room-row" + (r.isMyTurn ? " is-my-turn" : "");
-  const info = document.createElement("div");
-  info.className = "online-room-info";
-  const statusLabel = r.status === "playing" ? "in progress" : "in lobby";
-  // When it's the local user's turn, the meta line leads with a "Your turn"
-  // pill so it's the first thing the eye lands on. The whole row also picks
-  // up the .is-my-turn class for the accent border + tint.
-  const turnPill = r.isMyTurn ? `<span class="turn-pill">Your turn</span>` : "";
-  info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${turnPill}${r.players}/${r.maxPlayers} players · ${statusLabel}${r.isHost ? " · host" : ""}</span>`;
-  row.appendChild(info);
-  const btn = document.createElement("button");
-  btn.className = "pill primary";
-  btn.textContent = r.isMyTurn ? "Play" : "Rejoin";
-  btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
-  row.appendChild(btn);
-  wrap.appendChild(row);
-
-  attachRowSwipe(wrap, row, actions);
-  return wrap;
-}
-
-// Generic pointer-event swipe. Open state: the row is translated left by the
-// action panel's width, revealing it. Closing happens on outside tap, or on
-// any non-swipe interaction with the row (Rejoin click etc).
-function attachRowSwipe(wrap, row, actions) {
-  let startX = 0, startY = 0, dx = 0, active = false, gestured = false, locked = "none";
-  const ACTIVATION_PX = 6;
-
-  const setOffset = (px) => { row.style.transform = `translateX(${px}px)`; };
-  const close = () => { wrap.classList.remove("is-open"); setOffset(0); dx = 0; };
-  const open = () => {
-    // Close any other open rows first — only one panel revealed at a time.
-    document.querySelectorAll(".online-room-row-wrap.is-open").forEach(other => {
-      if (other !== wrap) {
-        other.classList.remove("is-open");
-        const inner = other.querySelector(".online-room-row");
-        if (inner) inner.style.transform = "translateX(0)";
-      }
-    });
-    wrap.classList.add("is-open");
-    setOffset(-actionsWidth());
-  };
-  const actionsWidth = () => actions.getBoundingClientRect().width || 96;
-
-  row.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("button")) return;       // let buttons do their own thing
-    startX = e.clientX; startY = e.clientY;
-    active = true; gestured = false; locked = "none";
-    row.style.transition = "none";
-  });
-  row.addEventListener("pointermove", (e) => {
-    if (!active) return;
-    const ddx = e.clientX - startX;
-    const ddy = e.clientY - startY;
-    if (locked === "none") {
-      if (Math.abs(ddx) < ACTIVATION_PX && Math.abs(ddy) < ACTIVATION_PX) return;
-      // Horizontal-dominant wins the gesture; vertical bails so the parent
-      // scroll container keeps the y-axis.
-      locked = Math.abs(ddx) > Math.abs(ddy) ? "x" : "y";
-      if (locked === "y") { active = false; return; }
-      try { row.setPointerCapture(e.pointerId); } catch (_) {}
-    }
-    gestured = true;
-    e.preventDefault();
-    const base = wrap.classList.contains("is-open") ? -actionsWidth() : 0;
-    dx = Math.min(0, Math.max(-actionsWidth() - 30, base + ddx));
-    setOffset(dx);
-  });
-  const finish = () => {
-    if (!active) { row.style.transition = ""; return; }
-    active = false;
-    row.style.transition = "";
-    if (locked !== "x" || !gestured) return;
-    if (dx <= -actionsWidth() / 2) open();
-    else close();
-  };
-  row.addEventListener("pointerup", finish);
-  row.addEventListener("pointercancel", finish);
-}
-
-document.addEventListener("click", (e) => {
-  // Any click outside an open row collapses it.
-  const open = document.querySelectorAll(".online-room-row-wrap.is-open");
-  if (!open.length) return;
-  open.forEach(wrap => {
-    if (!wrap.contains(e.target)) {
-      const inner = wrap.querySelector(".online-room-row");
-      if (inner) inner.style.transform = "translateX(0)";
-      wrap.classList.remove("is-open");
-    }
-  });
-});
-
-function confirmArchiveRow(r, wrap) {
-  showConfirm({
-    title: "Archive this game?",
-    body: `Drop your seat at "${r.name}". The game will disappear from your list; remaining players can keep going with one fewer seat.`,
-    confirmLabel: "Archive",
-    onConfirm: async () => {
-      try { await online.archive(r.roomId); } catch (e) { toast((e && e.message) || "Couldn't archive."); }
-      loadResumableRooms();
-    },
-  });
-}
-
-function confirmEndRow(r, wrap) {
-  showConfirm({
-    title: "End this game?",
-    body: `Close "${r.name}" for everyone. The game will be deleted and disappear from every player's list. This can't be undone.`,
-    confirmLabel: "End game",
-    onConfirm: async () => {
-      try { await online.endGame(r.roomId); } catch (e) { toast((e && e.message) || "Couldn't end the game."); }
-      loadResumableRooms();
-    },
-  });
-}
-
-async function loadOnlineRoomList() {
-  const host = $("online-room-list");
-  if (!host) return;
-  host.innerHTML = `<p class="muted small-help">Loading…</p>`;
-  try {
-    const rooms = await online.refreshRoomList();
-    renderOnlineRoomList(rooms);
-  } catch (e) {
-    host.innerHTML = `<p class="muted small-help">Couldn't load tables — ${escapeHTML(e.message || "try again")}.</p>`;
-  }
-}
-
-function renderOnlineRoomList(rooms) {
-  const host = $("online-room-list");
-  host.innerHTML = "";
-  if (!rooms.length) {
-    host.innerHTML = `<p class="muted small-help">No public tables right now — create one!</p>`;
-    return;
-  }
-  for (const r of rooms) {
-    const row = document.createElement("div");
-    row.className = "online-room-row";
-    const info = document.createElement("div");
-    info.className = "online-room-info";
-    info.innerHTML = `<strong>${escapeHTML(r.name)}</strong><span>${r.players}/${r.maxPlayers} players</span>`;
-    row.appendChild(info);
-    const btn = document.createElement("button");
-    btn.className = "pill";
-    btn.textContent = "Join";
-    btn.addEventListener("click", () => joinOnlineRoom(r.roomId, ""));
-    row.appendChild(btn);
-    host.appendChild(row);
-  }
-}
-
-async function onlineCreate() {
-  const opts = {
-    name: $("online-room-name").value.trim(),
-    visibility: onlineVisibility,
-    password: $("online-room-password").value,
-    displayName: onlineDisplayName(),
-    maxPlayers: onlineMaxPlayers,
-    hideWildLabel: onlineHideWildLabel,
-  };
-  if (opts.visibility === "private" && !opts.password) { toast("Set a password for a private table."); return; }
-  $("online-create-btn").disabled = true;
-  try {
-    const res = await online.createRoom(opts);
-    enterLobbyScreen(res);
-  } catch (e) {
-    if (e && e.data && e.data.code === "table-cap") promptForArchiveOldRoom(e.data);
-    else toast((e && e.message) || "Couldn't create the table.");
-  } finally {
-    $("online-create-btn").disabled = false;
-  }
-}
-
-// The poll loop reports the room was deleted out from under us (host ended
-// it, or it was archived to oblivion). Drop any in-memory match state and
-// bounce back to the start screen with a toast.
-function handleOnlineRoomGone() {
-  state = null;
-  ui.selectedIds.clear();
-  toast("This table has been closed.");
-  goToStartConfigStep("online");
-  showScreen("screen-start");
-  loadResumableRooms();
-}
-
-// Server says the user is at the per-account table cap. Surface a confirm
-// modal that nudges them to the "Your tables" list — no auto-archive (we
-// don't know which one they want to drop).
-function promptForArchiveOldRoom(data) {
-  const cap = (data && data.cap) || 10;
-  showConfirm({
-    title: "Table limit reached",
-    body: `You can have up to ${cap} open tables at once. Swipe a game in "Your tables" to archive it, then try again.`,
-    confirmLabel: "OK",
-    onConfirm: () => { loadResumableRooms(); },
-  });
-}
-
-function onlineJoin() {
-  const code = $("online-join-code").value.trim().toUpperCase();
-  if (!code) { toast("Enter a table code."); return; }
-  joinOnlineRoom(code, $("online-join-password").value);
-}
-
-async function joinOnlineRoom(code, password) {
-  try {
-    const res = await online.joinRoom(code, password, onlineDisplayName());
-    if (online.isActive()) {
-      // Rejoined an in-progress game and the server returned live state, so
-      // online.route() has already swapped to the play screen. Nothing to do.
-      return;
-    }
-    if (res.status === "lobby") {
-      enterLobbyScreen(res);
-    } else {
-      // Server didn't include state (older deploy, finished game, etc.) —
-      // fall back to showing the lobby shell while the next poll catches up.
-      showScreen("screen-online-lobby");
-      $("lobby-status").textContent = "Joining game…";
-    }
-  } catch (e) {
-    if (e && e.data && e.data.code === "table-cap") promptForArchiveOldRoom(e.data);
-    else toast((e && e.message) || "Couldn't join that table.");
-  }
-}
-
-function enterLobbyScreen(res) {
-  $("lobby-room-name").textContent = res.name || "Benny";
-  $("lobby-room-code").textContent = res.roomId;
-  renderLobbyRoster(res.players, { status: "lobby", maxPlayers: res.maxPlayers });
-  showScreen("screen-online-lobby");
-}
-
-// Called both from enterLobbyScreen and from each poll while we have a session.
-// When two or more seats share a (case-insensitive) display name, append a
-// short uid-derived suffix to each colliding name so the roster stays
-// visually unambiguous. Identity is keyed on uid server-side, so this is
-// purely a UX nicety, not a security boundary.
-function disambiguatePlayerLabels(players) {
-  const counts = new Map();
-  for (const p of players) {
-    const k = (p.name || "").trim().toLowerCase();
-    counts.set(k, (counts.get(k) || 0) + 1);
-  }
-  const labels = {};
-  for (const p of players) {
-    const k = (p.name || "").trim().toLowerCase();
-    if (counts.get(k) > 1 && p.uid) {
-      // Last 4 alphanumeric chars of uid. Identity uids are long opaque
-      // strings, so 4 chars give 1/65k visual collisions — more than enough
-      // for a 4-seat room.
-      const tag = p.uid.replace(/[^A-Za-z0-9]/g, "").slice(-4);
-      labels[p.seat] = `${p.name} #${tag}`;
-    } else {
-      labels[p.seat] = p.name;
-    }
-  }
-  return labels;
-}
-
-// Format presence as a short "away" label. Returns "" if the seat is online.
-// Otherwise: "away" for < 1 min, "away Nm" up to an hour, then "away Nh".
-// Reads `lastSeenAt` (ISO string) from the server response; missing on rows
-// from older deploys, in which case we fall back to a plain "away".
-function presenceLabel(p) {
-  if (p && p.online) return "";
-  if (!p || !p.lastSeenAt) return "away";
-  const ageMs = Date.now() - new Date(p.lastSeenAt).getTime();
-  const mins = Math.floor(ageMs / 60_000);
-  if (mins < 1) return "away";
-  if (mins < 60) return `away ${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  return `away ${hrs}h`;
-}
-
-// Builds the inline presence markup (dot + optional "away" label) used both
-// in the lobby roster and on in-game opponent rows.
-function presenceMarkup(p, { dotOnly = false } = {}) {
-  // `online` may be undefined on snapshots from older server deploys — treat
-  // as online so we don't falsely fade everyone.
-  const isOnline = p && p.online !== false;
-  const dot = `<span class="presence-dot ${isOnline ? "is-online" : "is-away"}" title="${isOnline ? "Online" : "Away"}" aria-hidden="true"></span>`;
-  if (isOnline || dotOnly) return dot;
-  return `${dot}<span class="presence-away">${escapeHTML(presenceLabel(p))}</span>`;
-}
-
-// Every server poll delivers a fresh roster (including per-seat presence).
-// In the lobby we re-render the roster panel; once in play we re-render the
-// opponent rows so the green/grey presence dots stay live without waiting
-// for a new turn to trigger renderAll().
-function handleOnlineRoster(players, server) {
-  if (server && server.status === "lobby") {
-    renderLobbyRoster(players, server);
-    return;
-  }
-  const playScreen = $("screen-play");
-  if (state && playScreen && playScreen.classList.contains("active")) {
-    renderAllMelds();
-  }
-}
-
-function renderLobbyRoster(players, server) {
-  const list = $("lobby-player-list");
-  if (!list) return;
-  list.innerHTML = "";
-  const ordered = [...(players || [])].sort((a, b) => a.seat - b.seat);
-  const max = Number((server && server.maxPlayers) || online.maxPlayers()) || ordered.length;
-  const labels = disambiguatePlayerLabels(ordered);
-  for (const p of ordered) {
-    const row = document.createElement("div");
-    const isAway = p.online === false;
-    row.className = "lobby-player" + (p.connected ? "" : " is-disconnected") + (isAway ? " is-away" : "");
-    const tags = [];
-    if (p.seat === 0) tags.push("host");
-    if (p.seat === online.mySeat()) tags.push("you");
-    const tagMarkup = tags.length ? `<span class="lobby-tag">${tags.join(" · ")}</span>` : "";
-    row.innerHTML = `<span class="lobby-player-name">${presenceMarkup(p)}${escapeHTML(labels[p.seat])}</span>${tagMarkup}`;
-    list.appendChild(row);
-  }
-  // Empty placeholder slots show the host how many more players are needed.
-  const empties = Math.max(0, max - ordered.length);
-  for (let i = 0; i < empties; i++) {
-    const row = document.createElement("div");
-    row.className = "lobby-player is-empty";
-    row.innerHTML = `<span class="muted">Waiting for player…</span>`;
-    list.appendChild(row);
-  }
-  const startBtn = $("lobby-start-btn");
-  if (startBtn) {
-    // Host can only start once the table is full — that's the player count
-    // they committed to at create time.
-    const canStart = online.isHost() && ordered.length === max && max >= 2 && (!server || server.status === "lobby");
-    startBtn.classList.toggle("hidden", !canStart);
-  }
-  const statusEl = $("lobby-status");
-  if (statusEl && (!server || server.status === "lobby")) {
-    const remaining = max - ordered.length;
-    if (online.isHost()) {
-      statusEl.textContent = remaining > 0
-        ? `Waiting for ${remaining} more player${remaining === 1 ? "" : "s"}…`
-        : "Ready when you are — start the game.";
-    } else {
-      statusEl.textContent = remaining > 0
-        ? `Waiting for ${remaining} more player${remaining === 1 ? "" : "s"} before the host can start…`
-        : "Waiting for the host to start the game…";
-    }
-  }
-}
 
 // ---------- Version stamp ----------
 // Keep in sync with CACHE in sw.js. Surfaced in the start-screen footer so the
@@ -3632,7 +2874,7 @@ function renderLobbyRoster(players, server) {
 // worker cache key (the thing that actually gates asset freshness): if it
 // disagrees with this constant, the client is serving stale cached assets and
 // the stamp flags it in red.
-const APP_BUILD = "v93";
+const APP_BUILD = "v94";
 
 // Display the build as dot-separated digits, zero-padded to 3 ("v74" -> "v.0.7.4").
 function formatBuild(ver) {
@@ -3664,8 +2906,6 @@ async function renderVersionStamp() {
 function boot() {
   buildStart();
   wireUp();
-  buildOnlineUI();
-  initOnline();
   // Always open on the homepage (mode picker) rather than jumping into the
   // last-played mode. Saved matches are untouched — their resume banner shows
   // once the user picks that mode. selectMode keeps ui.mode at a sane default.
@@ -3678,49 +2918,6 @@ function boot() {
   });
   showScreen("screen-start");
   showWelcomeModalIfNeeded();
-  applyJoinDeepLink();
   renderVersionStamp();
-}
-
-// Consume ?join=CODE on first load: drop the user on the Online tab with the
-// code pre-filled, then join the table directly. Identity inits asynchronously,
-// so if they're not signed in yet the code is held and the join fires the
-// moment auth resolves (tryPendingJoin is also called from initOnline's auth
-// callbacks). The param is stripped from the URL so a refresh doesn't
-// re-trigger the deep link.
-let pendingJoinCode = null;
-
-function applyJoinDeepLink() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const code = (params.get("join") || "").trim().toUpperCase();
-    if (code) {
-      goToStartConfigStep("online");
-      const input = $("online-join-code");
-      if (input) {
-        input.value = code;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      pendingJoinCode = code;
-      tryPendingJoin();
-    }
-    // Clean the URL so reloads don't re-apply the deep link.
-    params.delete("join");
-    const cleanQuery = params.toString();
-    const newUrl = window.location.pathname + (cleanQuery ? "?" + cleanQuery : "") + window.location.hash;
-    window.history.replaceState({}, "", newUrl);
-  } catch (_) { /* URL parsing or history API unavailable — ignore */ }
-}
-
-// Fire the deferred deep-link join once Identity is ready and the user is
-// signed in. No-op until both hold — it's called again from the auth
-// callbacks, so a sign-in completed after clicking the link still joins.
-function tryPendingJoin() {
-  if (!pendingJoinCode) return;
-  if (!net.isIdentityAvailable() || !net.currentUser()) return;
-  const code = pendingJoinCode;
-  pendingJoinCode = null;
-  const pwField = $("online-join-password");
-  joinOnlineRoom(code, pwField ? pwField.value : "");
 }
 document.addEventListener("DOMContentLoaded", boot);

@@ -1,9 +1,7 @@
 # Benny — Project Guide
 
 A card game (14 rounds, 1 wildcard). Static web app: vanilla ES modules, no
-build step, served from this directory. Online multiplayer adds a thin
-Netlify Functions + Neon Postgres backend at the repo root — the client
-stays buildless.
+build step, served from this directory.
 
 ## Run
 
@@ -11,9 +9,7 @@ stays buildless.
 python -m http.server 8000
 ```
 
-Open `http://localhost:8000` for hot-seat modes. For Online mode
-(Identity, Functions, DB), run `netlify dev` from the repo root and see
-[../../ONLINE_SETUP.md](../../ONLINE_SETUP.md). Browser target:
+Open `http://localhost:8000`. Browser target:
 **Safari 14.1+ / Firefox 103+** (modern features used unconditionally —
 `inset` shorthand, `replaceChildren`, `100dvh`, `backdrop-filter`,
 pointer events).
@@ -24,15 +20,14 @@ Tooling lives at the **repo root** (`../../`), not in this directory — the
 client stays buildless; tests are dev-only.
 
 ```sh
-npm test            # Vitest: unit + DOM (jsdom) + backend — runs in Node, fast
+npm test            # Vitest: unit + DOM (jsdom) — runs in Node, fast
 npm run test:e2e    # Playwright: drives index.html in a real browser
 ```
 
 - **Vitest** (`vitest.config.js`) covers `tests/unit` (rng, cards, rules, game
-  incl. No Way Out, scoring, ai self-play, achievements, profiles), `tests/dom`
-  (jsdom: storage, `renderCard`) and `tests/backend` (`_engine` applyAction +
-  redaction, `_lib` password/rate-limit/etc. with a mocked Neon `sql` tag).
-  Shared card/meld builders are in `tests/helpers.js`.
+  incl. No Way Out, scoring, ai self-play, achievements, profiles) and
+  `tests/dom` (jsdom: storage, `renderCard`). Shared card/meld builders are in
+  `tests/helpers.js`.
 - **Playwright** (`playwright.config.js`, specs in `tests/e2e`) boots the static
   client via `python -m http.server` and exercises the start → deal → play flow.
   `tests/e2e/fixtures.js` seeds a username (skips the welcome modal) and the
@@ -47,11 +42,11 @@ npm run test:e2e    # Playwright: drives index.html in a real browser
 
 ```text
 benny-card-game/
-├── index.html              # all screens (start, online lobby, reveal, pass, play,
+├── index.html              # all screens (start, reveal, pass, play,
 │                           #   scoring, round-end, match-end) + modals
 ├── css/styles.css          # single stylesheet
 ├── manifest.webmanifest    # PWA manifest
-├── sw.js                   # service worker (cache-first; bypasses /.netlify/functions)
+├── sw.js                   # service worker (cache-first shell + offline fallback)
 ├── js/
 │   ├── main.js             # UI controller, screen routing, event wiring, boot
 │   ├── cards.js            # deck model + card renderer (two render modes — see below)
@@ -64,9 +59,7 @@ benny-card-game/
 │   ├── storage.js          # localStorage: per-mode match slots + user prefs
 │   ├── profiles.js         # persistent per-player profiles (lifetime stats + history)
 │   ├── achievements.js     # registry + pure evaluators run at match end
-│   ├── tutorial.js         # first-time tutorial driver (pre-seeded deck + coach)
-│   ├── net.js              # online transport + Netlify Identity wrapper
-│   └── online.js           # online session controller (lobby, turn commit, replay)
+│   └── tutorial.js         # first-time tutorial driver (pre-seeded deck + coach)
 └── assets/
     ├── favicon.png         # B-card art — favicon + apple-touch-icon + top-bar logo
     ├── logo-bg.png         # full Benny banner — start-screen hero
@@ -78,32 +71,6 @@ benny-card-game/
                             # 52 used (rank+suit, "10" → "T", e.g. AS.svg, TC.svg).
                             # Backs/jokers (1B/2B, 1J/2J, "Back (n)") are unused —
                             # card backs are CSS-built via .card.back in styles.css.
-```
-
-Online backend (at the repo root — not inside this directory):
-
-```text
-netlify.toml                # publish=".", functions dir, /api/* → /.netlify/functions/*
-netlify/functions/
-├── _lib.mjs                # db() + getUser() + password hash + room-code maker
-├── _engine.mjs             # server-side engine wrapper: applyAction() + redactStateForSeat()
-│                           #   (re-exports browser engine from projects/benny-card-game/js/)
-├── auth-sync.mjs           # POST: upsert users row from Identity JWT
-├── create-room.mjs         # POST: host a new room (public/private, password optional)
-├── join-room.mjs           # POST: take a seat in a room
-├── list-rooms.mjs          # GET:  public lobby-state rooms
-├── my-rooms.mjs            # GET:  signed-in user's active tables (resume affordance)
-├── leave-room.mjs          # POST: drop a seat
-├── start-game.mjs          # POST: host signal to deal; server shuffles + deals from room_seats
-├── get-room.mjs            # GET:  poll endpoint; ETag/304 fast path; returns redacted state
-├── apply-action.mjs        # POST: server-authoritative move commit; validates + applies via engine
-├── submit-turn.mjs         # POST: host control writes (advanceRound / finishMatch only)
-└── end-game.mjs            # POST: host-only, hard-deletes the room (cascade)
-
-# Schema lives in ONLINE_SETUP.md §3 (run once via Neon SQL Editor).
-package.json                # @netlify/neon + drizzle-orm + drizzle-kit
-drizzle.config.ts           # schema location + connection URL (NETLIFY_DATABASE_URL)
-ONLINE_SETUP.md             # operator setup notes
 ```
 
 ## Card rendering — two modes
@@ -175,8 +142,7 @@ Three distinct keys, each owned by a different module:
 - `benny:players:v1` (in `profiles.js`) — per-player lifetime profiles,
   keyed by `name.trim().toLowerCase()` so casing variants share a
   record. Holds `{stats, achievements[], matchHistory[]}`. Folded in at
-  match-end via `recordMatch()`. **Local profiles aren't recorded for
-  online matches yet.**
+  match-end via `recordMatch()`.
 
 `hasSnapshot(mode)` + `load(mode)` + `loadAll()` drive the resume banner
 on the start screen and the overwrite-confirmation modal. The banner
@@ -188,7 +154,7 @@ labels the most recent saved match with its mode name.
 
 ### Downloadable per-match transcript (`moveLog`)
 
-`moveLog` is a single **ordered** transcript of every move in the match — one entry per `drawDeck`, `drawDiscard`, `play`, `add`, `swap`, `discard`, plus `roundStart`/`roundEnd` markers — appended by `logMove()` from inside each engine action in `game.js`. Each entry is self-describing: `{seq, round, wildcardRank, type, playerIdx, …}`. It records **public information only** — a `drawDeck` entry notes that a draw happened but **never** the card's identity, because `_engine.mjs:redactStateForSeat` does not redact `matchEvents`, so the whole slice reaches every seat in online play. Melds, discards and discard-pile pickups are public (they're on the table / face-up), so their card detail is logged.
+`moveLog` is a single **ordered** transcript of every move in the match — one entry per `drawDeck`, `drawDiscard`, `play`, `add`, `swap`, `discard`, plus `roundStart`/`roundEnd` markers — appended by `logMove()` from inside each engine action in `game.js`. Each entry is self-describing: `{seq, round, wildcardRank, type, playerIdx, …}`. It records **public information only** — a `drawDeck` entry notes that a draw happened but **never** the card's identity. Melds, discards and discard-pile pickups are public (they're on the table / face-up), so their card detail is logged.
 
 At match-end the log flows through `buildMatchSummary` (as part of `matchEvents`) into each player's profile: `recordMatch` (profiles.js) stores `moveLog`, `players` (names by index), `playerIdx` and `roundHistory` on the `matchHistory` row. To bound localStorage the heavy fields are kept only on the most recent `LOG_DETAIL_CAP` (20) rows — older rows keep their summary stats but shed the log. The **Recent matches** table (achievements/profile screen) renders a per-row **Download** button (`renderProfileRecent` → `downloadMatchLog` → `buildMatchLogText` in main.js) that emits a readable `.txt` transcript; rows whose log has been trimmed show a muted dash instead.
 
@@ -224,16 +190,14 @@ for a real deadlock:
 
 When all hold, the round ends as a draw via `finalizeNoWayOut(state)`:
 everyone scores their full hand (no winner zero-score) and the round-end screen
-shows a "No Way Out" banner. The check runs after each discard — in `main.js`
-for local play and in `apply-action.mjs` (server-authoritative) for online,
-which threads a `noWayOut` flag back through `online.js` for the banner.
+shows a "No Way Out" banner. The check runs after each discard in `main.js`.
 
 ## PWA / offline
 
 Benny is an installable PWA scoped to `./` (so it's self-contained inside `projects/benny-card-game/` and doesn't claim the buildfun homepage).
 
 - `manifest.webmanifest` — `display: standalone`, portrait, navy theme/background. Icons at `assets/icon-192-v4.png` and `assets/icon-512-v4.png` plus maskable variants (declared `"any maskable"` so Android adaptive cropping keeps the B visible). Filenames are versioned (`-v4`) so installed PWAs pick up the new launcher art when icons change — **always bump the `-vN` suffix when the icon bytes change; reusing a filename leaves Android's WebAPK on the old icon since it keys on the URL.** Icons are transparent — no navy plate.
-- `sw.js` — cache-first service worker. On install, pre-caches the full shell: HTML, CSS, all JS modules (including `tutorial.js`, `net.js`, `online.js`), the asset PNGs, both icons + maskable variants, screenshots, and all 56 card SVGs. POSTs pass through (so the Netlify feedback form still works). Offline navigations fall back to `./index.html`. **`/.netlify/functions/*` and `/api/*` are bypassed entirely** — online polls must always hit the network or the game would freeze on stale state. Registered at end of `index.html` after the main module loads.
+- `sw.js` — cache-first service worker. On install, pre-caches the full shell: HTML, CSS, all JS modules (including `tutorial.js`), the asset PNGs, both icons + maskable variants, screenshots, and all 56 card SVGs. POSTs pass through (so the Netlify feedback form still works). Offline navigations fall back to `./index.html`. Registered at end of `index.html` after the main module loads.
 
 **Bump the cache version on every deploy that changes a shell file.** The `CACHE = "benny-vN"` constant at the top of `sw.js` is the cache key; the activate handler deletes any cache whose key doesn't match. Bumping is what forces installed clients to re-fetch updated JS/CSS/assets.
 
@@ -247,7 +211,7 @@ Top bar of both the play and scoring screens has a **Save & exit** pill (`#play-
 2. Drops in-memory `state`, clears `ui.selectedIds`.
 3. Re-renders the resume banner, shows `screen-start`.
 
-The save itself is automatic — this button is just the "stop and walk away" affordance. Online matches save server-side, so this is a no-op outside of clearing local UI.
+The save itself is automatic — this button is just the "stop and walk away" affordance.
 
 ## Overwrite confirmation
 
@@ -285,130 +249,12 @@ The drag also accepts the discard pile and other players' melds as drop targets,
 
 `tutorial.js` runs an opt-in walkthrough on first launch (and on demand from the start panel). It seeds the top of round 1's deck so the deal is deterministic — the human gets a 5-5-5 set + a 6-7-8-A run after one draw — then attaches coach balloons that anchor to the top of the viewport and highlight the next UI element to interact with. `main.js` calls `tutorial.notify(event, payload)` at every action site (`draw`, `select`, `placeSet`, `discard`, …); the tutorial advances when the expected event arrives. A "Skip tutorial" button lives on the coach, and a "Hide" link next to the start-panel link dismisses the prompt forever (stored in prefs).
 
-## Online multiplayer
-
-`js/online.js` is the session controller; `js/net.js` is the transport. Together they bolt a 4th mode onto the existing engine without duplicating any game logic.
-
-### Auth
-
-Netlify Identity widget is **self-hosted** at `assets/netlify-identity-widget.js` and loaded as a classic script (with `integrity="sha384-…"`) so `window.netlifyIdentity` exists before `main.js` (a deferred module) boots. The vendor CDN at `identity.netlify.com` doesn't serve `Access-Control-Allow-Origin`, so SRI + `crossorigin="anonymous"` on the CDN URL silently fails — self-hosting sidesteps that AND lets the SW pre-cache the widget for fast first paint. To refresh on a new widget release, re-run the curl + openssl block in [index.html](index.html) and bump the SW cache version. `net.initIdentity()` wires `init` / `login` / `logout` events and resolves with the mapped user. JWTs are fetched per-request via `user.jwt()` and sent as `Authorization: Bearer …`; Netlify Functions resolve them via `context.clientContext.user`. The card-style preference is gated behind being signed in.
-
-### Backend (Netlify Functions + Neon Postgres)
-
-Tables (schema lives in ONLINE_SETUP.md §3; create once via the Neon SQL Editor):
-
-- `users (uid PK, display_name, created_at)` — populated by `auth-sync` on first sign-in; canonical source for seat display names (see `_lib.mjs:canonicalDisplayName`).
-- `rooms (id PK = join code, name, host_uid, visibility, password_hash?, status, max_players, …)`. `password_hash` is PBKDF2-SHA256 / 210k iterations (`_lib.mjs:hashPassword`); the legacy single-round-SHA-256 format is still accepted by `verifyPassword` for any pre-cutover rows.
-- `room_seats (room_id, seat_index, uid, display_name, connected, last_seen_at, …)` PK on (room_id, seat_index). `display_name` is set by the server from `users.display_name`; client-supplied display names are ignored. `last_seen_at` is bumped by `get-room` polls (throttled to once per 15 s per seat) and powers the presence indicator (see "Presence" below).
-- `games (room_id PK, seq, current_seat, status, state JSONB, last_turn JSONB, updated_at)`. State is server-authoritative; reads through `get-room` / `apply-action` are always redacted for the caller's seat.
-- `rate_limit_bucket (uid, endpoint, bucket_start, count)` PK on (uid, endpoint, bucket_start) — backs `_lib.mjs:rateLimit`. Bucketed sliding-window counter: each request UPSERTs the current minute-bucket and the limiter SUMs counts across buckets in the window. Budgets defined in `_lib.mjs:RATE_BUDGETS`.
-
-Join codes use an unambiguous alphabet (no 0/O/1/I), generated in `_lib.mjs:makeRoomCode`.
-
-`@netlify/neon` is the SQL client. Choosing it (vs `@netlify/database`) is what tells Netlify to provision the database and inject `NETLIFY_DATABASE_URL` on deploy — `db()` in `_lib.mjs` lazily calls `neon()` which reads that env var.
-
-### Presence
-
-Every `get-room` poll doubles as a heartbeat. The endpoint bumps the caller's
-`room_seats.last_seen_at = now()` — throttled to once per 60s so a tight poll
-loop doesn't write per-request — and returns each seat tagged with
-`online` (last seen within 90s) plus the ISO `lastSeenAt`. The client renders
-a green/grey dot in the lobby roster and on in-game opponent rows; offline
-seats also get a small "away" / "away 2m" / "away 1h" label and the row
-fades to ~65% opacity. Self is never decorated (you're obviously looking
-at the page). Presence is purely a UX signal — it doesn't gate any
-server-side authorization, which still keys off seat membership and `connected`.
-
-### Polling (`get-room` + ETag/304 fast path)
-
-`net.js` runs a single in-flight, self-rescheduling poll loop. The base interval is dynamic: 5 s in the lobby, 1.5 s once status flips to `playing`. Each poll sends `If-None-Match: "<seq>-<roomsUpdatedAtEpoch>"`; when both halves match the server's current values, it returns 304 with no body and skips the heavy state/roster reads + presence write. The composite is needed because lobby joins/leaves bump `rooms.updated_at` without touching `games.seq` — seq-only ETag would hide new players from the host. Polling pauses while `document.hidden` and resumes with an immediate tick on `visibilitychange`, so a backgrounded tab stops hitting the server but catches up fast on return.
-
-**Exponential backoff:** each 304 doubles the next poll interval, capped at 5 minutes. Any 200 (state changed) resets to the base. So a quiet lobby decays from 5 s → 10 s → 20 s → … → 5 min over a few minutes; one player joining or any in-game action drops every poller back to the base on the next tick. The backoff also resets when the base changes (lobby → playing), so a starting game polls at 1.5 s immediately rather than inheriting the lobby's stale backoff.
-
-**Known limitation:** `room_seats.last_seen_at` updates do NOT invalidate the ETag. A player who AFKs and returns won't reappear as "online" on other screens until something else bumps the version (a join, leave, or game action). Acceptable for friends-only multiplayer; presence catches up the next time anything material happens.
-
-### Turn commits + optimistic concurrency
-
-Every game move goes through `apply-action.mjs` as a typed action
-(`drawDeck`, `drawDiscard`, `play`, `add`, `swap`, `discard`). The server
-holds the canonical state and applies each action through the same
-`game.js`/`rules.js` engine the client uses — clients never write state
-directly. The endpoint enforces:
-
-- Auth: caller must hold a seat in the room.
-- Turn: `seat === current_seat`.
-- Optimistic concurrency: `expectedSeq === games.seq`. Stale → 409 with the
-  caller's redacted state attached so they can adopt and retry.
-
-Host control writes (round advance / match finish) live in `submit-turn.mjs`
-and only accept `{action: "advanceRound" | "finishMatch"}`. Same auth + seq
-checks; no general state writes.
-
-### Hand + deck redaction
-
-`_engine.mjs:redactStateForSeat(state, seat)` deep-clones the canonical state
-and replaces every other player's `hand` with same-length opaque
-placeholders (`{id: "hidden-...", hidden: true}`), and replaces `deck` the
-same way. The caller's own hand is left intact. Every endpoint that returns
-state runs through this — `get-room`, `apply-action`, `join-room` (rejoin),
-`submit-turn` (stale 409s). The drawn card from `drawDeck` is sent only on
-the actor's `apply-action` response (under `drawnCard`); it's never
-persisted in `last_turn` so spectators never see it.
-
-### Replay (spectator side)
-
-When the poll loop notices `lastTurn.seat !== mySeat`, it routes the new
-action(s) through `replayRemote()`, which:
-
-1. Begins a turn on the local state mirror (only on the first delta of a new turn).
-2. Walks the new tail of `lastTurn.actions`, calling `cb.stepRemoteAction(action)` for each.
-3. Paces inter-action delays from the actor's `at` timestamps (capped at 1500 ms so an AFK actor doesn't freeze the spectator).
-4. Returns `{isDone, replayedCount, lastActionAt}` so the next poll only animates the new tail. Final discard flips `isDone` true; we then adopt the authoritative server state and `route()` (which may hand the turn to us).
-
-The actor's hand is redacted on the spectator side, so before each engine
-apply `stepCpuAnimated` calls `patchActorHandFromAction(action, actorIdx)`.
-That function inspects the action payload (`discard.card`, `swap.natural`,
-`play.arrangement.cards`, `add.arrangement.added` — all *public-info* cards
-that are leaving the actor's hand) and splices each real card into the
-actor's hidden hand by replacing one placeholder. The engine can then find
-the card by id and animate normally. Cards that never become public (e.g.,
-the card drawn from the deck) stay hidden — the spectator sees a
-face-down ghost.
-
-### Mid-turn refresh recovery (actor side)
-
-If the actor refreshes the page, their next `get-room` poll lands the server's
-current state (with their own hand visible) and the partial `last_turn.actions`
-list. Because every action is server-committed before the actor's UI updates,
-there's no client-only "in flight" state to recover — whatever the actor saw
-last is what the server stored.
-
-### Lifecycle: archive, end-game, room cleanup
-
-Two destructive actions, both server-authoritative:
-
-- **Archive (any seat)** — `leave-room` with `{archive: true}`. Removes the caller's seat AND decrements `rooms.max_players` by 1. The room auto-deletes when `max_players < 2`, when `room_seats` becomes empty, or when the host archives an in-progress game (the table can't continue without its host).
-- **End game (host only)** — `end-game.mjs`. Hard-deletes the `rooms` row (cascades to `room_seats` + `games`). Every other participant's next poll hits 404 → `net.startPolling`'s `onError` callback fires → `online.js:onPollError` tears down the session → `main.js:handleOnlineRoomGone` toasts and routes them back to the start screen.
-
-Both surface in two places on the client:
-
-- **"Your tables" list** (start-screen Online tab) — each row is a swipe-to-reveal panel. Drag left ≥ half the panel width to open; tap **Archive** (any) or **End** (host). The swipe is built in `main.js:attachRowSwipe` and uses pointer events with a 6 px activation threshold + an x/y axis lock so vertical scrolls aren't claimed. Only one row can be open at a time.
-- **In-match hamburger menu** — "Archive & leave" (everyone in a session) and "End game" (host only). Both items carry the `.online-only` class and are toggled by `syncOnlineMenuVisibility()` on each menu open. The "End game" item also carries `.danger-item` for the red colour.
-
-### Per-user table cap
-
-A signed-in user can hold at most `MAX_ACTIVE_ROOMS_PER_USER` (10) seats across non-finished rooms. `create-room` and `join-room` both run `countActiveRoomsForUser` from `_lib.mjs` before allocating a new seat; hitting the cap returns `409 {code: "table-cap", cap}`. The client checks for that `code` and surfaces a confirm modal pointing the user to the "Your tables" list to archive an old one (existing-seat rejoins bypass the check, so a user at the cap can still reopen tables they're already in).
-
-### Host pre-commit: roster must be full
-
-`start-game.mjs` rejects with 409 unless `room_seats.count == rooms.max_players`. The lobby's Start button is also hidden client-side until that condition is true (`main.js:renderLobbyRoster`), but the server check is the source of truth — useful since `max_players` can drop after the lobby is rendered (someone archives while others wait).
-
 ## Conventions
 
 - Pure rule validation in `rules.js`; state mutation only in `game.js` / `scoring.js`.
 - `renderCard` and `renderCardBack` are the only places that touch card markup; everything else manipulates the `.card` div from the outside (classes, position).
 - `persist()` is called at every state transition in `main.js` — don't skip it on new code paths.
-- Online actions go through `online.applyOnlineOrLocal({action, localApply})` inside each action handler in `main.js`. When online, the action is committed server-side via `apply-action.mjs` and the post-state (redacted for the caller) is adopted. When offline, the `localApply` callback runs the engine directly. Same code path serves both modes.
+- Each action handler in `main.js` runs the engine directly (e.g. `drawFromDeck(state)`, `discard(state, id)`) then persists and re-renders.
 - Toast errors via `toast(message)` for user-facing rule rejections; rule functions return `{ ok: false, reason }`.
 - CSS variables for theme; raw hex only where the value is one-off (and even those got swapped during the theme conversion).
-- No build step on the client. The functions directory uses `esbuild` (configured in `netlify.toml`) — that's Netlify's bundler, not ours, and there's still nothing to install before serving the static site.
+- No build step — the static site is served as-is, nothing to install before serving.

@@ -1,9 +1,8 @@
 # Benny — card game
 
-A 2-to-4-player card game. 14 rounds, lowest cumulative score wins. The
-hot-seat modes are a static site — no build step, no backend, no
-dependencies. Online play adds a thin Netlify Functions + Neon
-Postgres backend, but the client itself is still vanilla ES modules.
+A 2-to-4-player card game. 14 rounds, lowest cumulative score wins. It's a
+static site — no build step, no backend, no dependencies, just vanilla
+ES modules.
 
 ## Modes
 
@@ -17,16 +16,11 @@ Pick one from the start screen:
 - **Scoring only** — companion for in-real-life play. The app deals
   nothing; you enter the winner and each loser's hand total per round,
   and it keeps cumulative scores across the 14 rounds.
-- **Online** — live, turn-based multiplayer. Sign in with Google or
-  email (Netlify Identity), create or join a table, share the code,
-  and play. Opponents' turns replay on your screen with the same
-  animation the CPU uses.
 
-In-progress matches in any local mode persist to `localStorage` —
-each mode keeps its own slot, so a paused Solo game won't get wiped
-when you start a Scoring session. The resume banner on the start
-screen offers the most recent saved match back. Online matches you've
-joined show up in a "My tables" list and resume on the server.
+In-progress matches in any mode persist to `localStorage` — each mode
+keeps its own slot, so a paused Solo game won't get wiped when you start
+a Scoring session. The resume banner on the start screen offers the most
+recent saved match back.
 
 ## First-time tutorial
 
@@ -53,10 +47,7 @@ python -m http.server 8000
 ```
 
 Then open `http://localhost:8000` in your browser. (Any static file
-server works — `npx serve`, `caddy file-server`, etc.) This serves the
-hot-seat modes only. Online mode needs the Netlify dev server with the
-functions running and a Neon DB attached — see
-[../../ONLINE_SETUP.md](../../ONLINE_SETUP.md).
+server works — `npx serve`, `caddy file-server`, etc.)
 
 ## Cross-browser test plan
 
@@ -108,8 +99,6 @@ benny-card-game/
     ├── ai.js               # CPU decision engine (Easy / Medium / Hard)
     ├── scoring.js          # Scoring-mode state machine (no engine, no deck)
     ├── tutorial.js         # First-time interactive tutorial
-    ├── net.js              # Online transport + Netlify Identity wrapper
-    ├── online.js           # Online session controller (lobby, turns, replay)
     ├── storage.js          # localStorage: per-mode match slots + prefs
     ├── profiles.js         # Lifetime per-player stats + match history
     ├── achievements.js     # Registry + evaluators run at match-end
@@ -117,10 +106,6 @@ benny-card-game/
     ├── dragdrop.js         # Hand reordering via pointer events (iOS-safe)
     └── rng.js              # crypto.getRandomValues + Fisher-Yates shuffle
 ```
-
-The online backend lives at the repository root in
-[../../netlify/functions/](../../netlify/functions/) — see
-[CLAUDE.md](./CLAUDE.md) for the full backend layout.
 
 ## Rules summary
 
