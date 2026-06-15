@@ -3,8 +3,8 @@
 //
 // Every achievement carries a `tier` (easy | medium | hard | rare). The set is
 // balanced to roughly 30% easy / 40% medium / 25% hard / 5% rare so there's
-// always something within reach and something to chase. Current mix (34 total):
-//   easy 8 (24%) · medium 14 (41%) · hard 10 (29%) · rare 2 (6%).
+// always something within reach and something to chase. Current mix (35 total):
+//   easy 9 (26%) · medium 15 (43%) · hard 9 (26%) · rare 2 (6%).
 
 export const ACHIEVEMENTS = [
   // ---- easy: most players trip these in their first games -------------------
@@ -16,6 +16,7 @@ export const ACHIEVEMENTS = [
   { id: "survivor", tier: "easy", icon: "🛟", name: "Survivor", desc: "Win a game even after picking up the pile.", test: (s) => s.place === 1 && s.pickups >= 1 },
   { id: "off_the_hook", tier: "easy", icon: "🎣", name: "Off the Hook", desc: "Finish a 3+ player game without being the Sh!thead.", test: (s) => !s.isShithead && s.total >= 3 },
   { id: "up_in_flames", tier: "easy", icon: "💥", name: "Up in Flames", desc: "Burn the pile for the first time.", test: (s) => s.burns >= 1 },
+  { id: "heads_up", tier: "easy", icon: "🤜", name: "Heads Up", desc: "Win a 1-on-1 game.", test: (s) => s.place === 1 && s.total === 2 },
 
   // ---- medium: a bit of skill, the right cards, or a few games ---------------
   { id: "four_play", tier: "medium", icon: "🍀", name: "Four Play", desc: "Burn the pile with a four-of-a-kind.", test: (s) => s.fourKinds >= 1 },
@@ -28,17 +29,17 @@ export const ACHIEVEMENTS = [
   { id: "no_laughing", tier: "medium", icon: "🛡️", name: "No Laughing Matter", desc: "Deflect a joker with a 3.", test: (s) => s.deflects >= 1 },
   { id: "send_in_clowns", tier: "medium", icon: "🤡", name: "Send in the Clowns", desc: "Drop 2 jokers on opponents in a single game.", test: (s) => s.jokers >= 2 },
   { id: "trash_panda", tier: "medium", icon: "🦝", name: "Trash Panda", desc: "Pick up the pile 3+ times and still dodge the Sh!thead title.", test: (s) => s.pickups >= 3 && !s.isShithead },
+  { id: "deflector_shield", tier: "medium", icon: "🪞", name: "Deflector Shield", desc: "Deflect 2+ jokers with a 3 in a single game.", test: (s) => s.deflects >= 2 },
 
   // ---- hard: real skill or a specific tough condition -----------------------
   { id: "clean_hands", tier: "hard", icon: "🧼", name: "Clean Hands", desc: "Win a game without ever picking up the pile.", test: (s) => s.place === 1 && s.pickups === 0 },
   { id: "pyromaniac", tier: "hard", icon: "🔥", name: "Pyromaniac", desc: "Burn the pile 3+ times in one game.", test: (s) => s.burns >= 3 },
   { id: "hard_mode", tier: "hard", icon: "😈", name: "No Mercy", desc: "Win a game against a Hard CPU.", test: (s) => s.place === 1 && s.difficulty === "hard" },
   { id: "quad_squad", tier: "hard", icon: "🧨", name: "Quad Squad", desc: "Lay four of a kind in a single move.", test: (s) => s.bigPlay >= 4 },
-  { id: "purist", tier: "hard", icon: "🚫", name: "Purist", desc: "Win without playing a single power card (2, 8, 10 or joker).", test: (s) => s.place === 1 && s.twos === 0 && s.eights === 0 && s.tens === 0 && s.jokers === 0 },
 
   // ---- rare: lucky and hard-won ---------------------------------------------
-  { id: "blind_luck", tier: "rare", icon: "🙈", name: "Blind Luck", desc: "Win by playing your last face-down card.", test: (s) => s.place === 1 && s.wonOnBlind },
   { id: "flawless", tier: "rare", icon: "😤", name: "Flawless Victory", desc: "Beat a Hard CPU without ever picking up the pile.", test: (s) => s.place === 1 && s.difficulty === "hard" && s.pickups === 0 },
+  { id: "slash_and_burn", tier: "rare", icon: "🌋", name: "Slash & Burn", desc: "Win a game in which you burned the pile 3+ times.", test: (s) => s.place === 1 && s.burns >= 3 },
 ];
 
 // Lifetime "progress" achievements — fill a bar over many games. `value(prof)`
