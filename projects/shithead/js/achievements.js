@@ -3,8 +3,8 @@
 //
 // Every achievement carries a `tier` (easy | medium | hard | rare). The set is
 // balanced to roughly 30% easy / 40% medium / 25% hard / 5% rare so there's
-// always something within reach and something to chase. Current mix (34 total):
-//   easy 8 (24%) · medium 14 (41%) · hard 10 (29%) · rare 2 (6%).
+// always something within reach and something to chase. Current mix (32 total):
+//   easy 8 (25%) · medium 14 (44%) · hard 9 (28%) · rare 1 (3%).
 
 export const ACHIEVEMENTS = [
   // ---- easy: most players trip these in their first games -------------------
@@ -34,10 +34,8 @@ export const ACHIEVEMENTS = [
   { id: "pyromaniac", tier: "hard", icon: "🔥", name: "Pyromaniac", desc: "Burn the pile 3+ times in one game.", test: (s) => s.burns >= 3 },
   { id: "hard_mode", tier: "hard", icon: "😈", name: "No Mercy", desc: "Win a game against a Hard CPU.", test: (s) => s.place === 1 && s.difficulty === "hard" },
   { id: "quad_squad", tier: "hard", icon: "🧨", name: "Quad Squad", desc: "Lay four of a kind in a single move.", test: (s) => s.bigPlay >= 4 },
-  { id: "purist", tier: "hard", icon: "🚫", name: "Purist", desc: "Win without playing a single power card (2, 8, 10 or joker).", test: (s) => s.place === 1 && s.twos === 0 && s.eights === 0 && s.tens === 0 && s.jokers === 0 },
 
   // ---- rare: lucky and hard-won ---------------------------------------------
-  { id: "blind_luck", tier: "rare", icon: "🙈", name: "Blind Luck", desc: "Win by playing your last face-down card.", test: (s) => s.place === 1 && s.wonOnBlind },
   { id: "flawless", tier: "rare", icon: "😤", name: "Flawless Victory", desc: "Beat a Hard CPU without ever picking up the pile.", test: (s) => s.place === 1 && s.difficulty === "hard" && s.pickups === 0 },
 ];
 
