@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evaluateMatch, ACHIEVEMENTS, PROGRESS_ACHIEVEMENTS } from "../../projects/benny-card-game/js/achievements.js";
+import { TOTAL_ROUNDS } from "../../projects/benny-card-game/js/game.js";
 
 // Minimal summary scaffold; override fields per test.
 function summary(over = {}) {
@@ -81,25 +82,25 @@ describe("wild-label-off achievements", () => {
 });
 
 describe("round-dominance achievements", () => {
+  // A full match plays all TOTAL_ROUNDS rounds; sweep() wins every one for P0.
+  const fullHistory = (winners) => winners.map((winnerIdx, i) => ({
+    round: i + 1, winnerIdx, cumulative: [0, 30 * (i + 1)], scores: [0, 30],
+  }));
   const sweep = (over) => summary({
-    roundHistory: [
-      { round: 1, winnerIdx: 0, cumulative: [0, 30], scores: [0, 30] },
-      { round: 2, winnerIdx: 0, cumulative: [0, 60], scores: [0, 30] },
-      { round: 3, winnerIdx: 0, cumulative: [0, 90], scores: [0, 30] },
-    ],
+    roundHistory: fullHistory(Array(TOTAL_ROUNDS).fill(0)),
     ...over,
   });
-  it("clean_sweep when the player wins every round (3+)", () => {
+  it("clean_sweep when the player wins every round of a full match", () => {
     expect(earnedFor(0, sweep())).toContain("clean_sweep");
   });
   it("no clean_sweep if a single round was lost", () => {
-    const sum = sweep({
-      roundHistory: [
-        { round: 1, winnerIdx: 0, cumulative: [0, 30] },
-        { round: 2, winnerIdx: 1, cumulative: [30, 30] },
-        { round: 3, winnerIdx: 0, cumulative: [30, 60] },
-      ],
-    });
+    const winners = Array(TOTAL_ROUNDS).fill(0);
+    winners[1] = 1; // P1 takes round 2
+    const sum = sweep({ roundHistory: fullHistory(winners) });
+    expect(earnedFor(0, sum)).not.toContain("clean_sweep");
+  });
+  it("no clean_sweep for an incomplete match, even if every played round was won", () => {
+    const sum = sweep({ roundHistory: fullHistory(Array(TOTAL_ROUNDS - 1).fill(0)) });
     expect(earnedFor(0, sum)).not.toContain("clean_sweep");
   });
   it("magnificent_seven at 7 round wins, unstoppable at 5 straight", () => {
