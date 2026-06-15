@@ -39,7 +39,7 @@ export const ACHIEVEMENTS = [
 
   // ---- rare: lucky and hard-won ---------------------------------------------
   { id: "flawless", tier: "rare", icon: "😤", name: "Flawless Victory", desc: "Beat a Hard CPU without ever picking up the pile.", test: (s) => s.place === 1 && s.difficulty === "hard" && s.pickups === 0 },
-  { id: "slash_and_burn", tier: "rare", icon: "🌋", name: "Slash & Burn", desc: "Win a game in which you burned the pile 3+ times.", test: (s) => s.place === 1 && s.burns >= 3 },
+  { id: "never_say_die", tier: "rare", icon: "💪", name: "Never Say Die", desc: "Win a game after picking up the pile 3+ times.", test: (s) => s.place === 1 && s.pickups >= 3 },
 ];
 
 // Lifetime "progress" achievements — fill a bar over many games. `value(prof)`
