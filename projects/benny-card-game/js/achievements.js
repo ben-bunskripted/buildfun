@@ -10,6 +10,8 @@
 //     summary  — the whole match summary (mode, roundHistory, matchEvents, etc.)
 //     profile  — this player's profile BEFORE this match (for lifetime/streak)
 
+import { TOTAL_ROUNDS } from "./game.js";
+
 // keyFor duplicated from profiles.js to avoid a circular import.
 const profileKey = (name) => String(name || "").trim().toLowerCase();
 
@@ -339,10 +341,12 @@ export const ACHIEVEMENTS = [
   // ---- Round dominance (any mode — roundHistory is populated in scoring too) ----
   {
     id: "clean_sweep", name: "Clean Sweep", icon: "🧹", category: "round", modes: ALL_MODES,
-    description: "Win every round in a match (3+ rounds).",
+    description: "Win every round in a match.",
     evaluate: ({ player, summary }) => {
       const rounds = summary.roundHistory.length;
-      return rounds >= 3 && roundsWonByPlayer(summary.roundHistory, player.idx) === rounds;
+      // A real match always plays all TOTAL_ROUNDS rounds; require a complete
+      // match so partial/abandoned summaries can't trivially earn the sweep.
+      return rounds === TOTAL_ROUNDS && roundsWonByPlayer(summary.roundHistory, player.idx) === rounds;
     },
   },
   {
